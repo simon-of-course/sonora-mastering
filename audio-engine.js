@@ -4,6 +4,11 @@
   const dbToGain = (db) => 10 ** (db / 20);
   const gainToDb = (gain) => gain > 0 ? 20 * Math.log10(gain) : -Infinity;
 
+  function getMixGains(intensity, bypass = false) {
+    const dry = bypass || intensity <= 0;
+    return { dryGain: dry ? 1 : 0, wetGain: dry ? 0 : 1 };
+  }
+
   function biquadCoefficients(type, sampleRate, frequency, q, gainDb = 0) {
     const omega = 2 * Math.PI * frequency / sampleRate;
     const cosine = Math.cos(omega);
@@ -413,7 +418,7 @@
     return { eq: recommendedEq, intensity, summary };
   }
 
-  const api = { measureLoudness, applyOutputLevel, analyzeResonances, analyzeMix, recommendAdaptiveMastering };
+  const api = { getMixGains, measureLoudness, applyOutputLevel, analyzeResonances, analyzeMix, recommendAdaptiveMastering };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (typeof window !== 'undefined') window.SonoraAudioEngine = api;
 })();

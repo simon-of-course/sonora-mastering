@@ -21,6 +21,13 @@ function createBuffer({ sampleRate = 48000, seconds = 3, channels = 1, sample })
   };
 }
 
+test('mastering intensity blends processing strength, never dry and phase-shifted wet audio', () => {
+  assert.deepEqual(engine.getMixGains(0.35), { dryGain: 0, wetGain: 1 });
+  assert.deepEqual(engine.getMixGains(1), { dryGain: 0, wetGain: 1 });
+  assert.deepEqual(engine.getMixGains(0), { dryGain: 1, wetGain: 0 });
+  assert.deepEqual(engine.getMixGains(0.7, true), { dryGain: 1, wetGain: 0 });
+});
+
 test('loudness normalization targets a commercial release level without exceeding the true-peak ceiling', () => {
   const buffer = createBuffer({
     sample: (frame, _channel, sampleRate) => 0.08 * Math.sin(2 * Math.PI * 1000 * frame / sampleRate)

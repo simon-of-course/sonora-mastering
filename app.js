@@ -203,8 +203,9 @@
     if (!audioNodes) return;
     const amount = bypass ? 0 : intensity / 100;
     const now = audioContext.currentTime;
-    audioNodes.dryGain.gain.setTargetAtTime(1 - amount, now, 0.025);
-    audioNodes.wetGain.gain.setTargetAtTime(amount, now, 0.025);
+    const gains = masteringEngine.getMixGains(amount, bypass);
+    audioNodes.dryGain.gain.setTargetAtTime(gains.dryGain, now, 0.025);
+    audioNodes.wetGain.gain.setTargetAtTime(gains.wetGain, now, 0.025);
     configureMasterChain(audioNodes.chain, PRESETS.universal, getEffectiveEq(), amount, now, getMasterSettings());
   }
 
@@ -711,10 +712,12 @@
 
   function createSaturationCurve(amount, userSaturation) {
     const curve = new Float32Array(4096);
-    const strength = Math.min(1, amount * 0.08 + userSaturation / 100);
+    const drive = userSaturation / 100 * 1.4;
     for (let index = 0; index < curve.length; index += 1) {
       const sample = (index * 2) / (curve.length - 1) - 1;
-      curve[index] = sample - strength * sample ** 3 * 0.2;
+      curve[index] = drive === 0
+        ? sample
+        : Math.tanh(drive * sample) / Math.tanh(drive);
     }
     return curve;
   }
