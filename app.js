@@ -2,23 +2,14 @@
   'use strict';
 
   const PRESETS = {
-    universal: { label: 'Universal', eq: [0, 0, 0, 0.2, 0.2], thresholds: [-25, -25, -24], ratios: [1.65, 1.7, 1.5], crossovers: [120, 2800], gain: 0.4 },
-    fire: { label: 'Fire', eq: [0.3, 0.4, 0.2, 0.9, 0.8], thresholds: [-28, -29, -26], ratios: [1.95, 2.05, 1.75], crossovers: [130, 3000], gain: 0.8 },
-    clarity: { label: 'Clarity', eq: [-0.6, -0.3, 0.1, 0.7, 0.9], thresholds: [-25, -26, -27], ratios: [1.6, 1.7, 1.8], crossovers: [140, 3200], gain: 0.5 },
-    tape: { label: 'Tape', eq: [0.5, 0.5, -0.3, 0.2, -0.2], thresholds: [-26, -26, -24], ratios: [1.75, 1.8, 1.5], crossovers: [125, 2600], gain: 0.5 },
-    natural: { label: 'Natural', eq: [0, 0, 0, 0, 0.1], thresholds: [-23, -23, -22], ratios: [1.4, 1.45, 1.35], crossovers: [110, 2700], gain: 0.2 },
-    cinematic: { label: 'Cinematic', eq: [0.8, 0.1, -0.5, 0.4, 0.7], thresholds: [-24, -24, -23], ratios: [1.45, 1.5, 1.4], crossovers: [140, 2500], gain: 0.3 },
-    bass: { label: 'Bass', eq: [1.3, 0.8, -0.2, 0, 0], thresholds: [-28, -25, -23], ratios: [2, 1.65, 1.45], crossovers: [150, 2800], gain: 0.55 },
-    punch: { label: 'Punch', eq: [0.6, 0.1, -0.2, 0.7, 0.2], thresholds: [-27, -29, -25], ratios: [1.85, 2, 1.65], crossovers: [135, 2600], gain: 0.7 },
-    warm: { label: 'Warm', eq: [0.8, 0.5, -0.2, -0.3, 0.1], thresholds: [-25, -26, -24], ratios: [1.7, 1.75, 1.5], crossovers: [120, 2500], gain: 0.45 },
-    open: { label: 'Open', eq: [-0.3, -0.2, 0.1, 0.5, 0.8], thresholds: [-23, -24, -24], ratios: [1.45, 1.55, 1.5], crossovers: [120, 3100], gain: 0.3 },
-    vocal: { label: 'Vocal', eq: [-0.5, -0.4, 0.7, 0.7, 0.3], thresholds: [-24, -27, -26], ratios: [1.5, 1.85, 1.75], crossovers: [150, 3200], gain: 0.4 },
-    lowend: { label: 'Low-end control', eq: [0.4, -0.3, 0, 0, 0], thresholds: [-30, -25, -24], ratios: [2.2, 1.65, 1.5], crossovers: [160, 2600], gain: 0.4 }
+    universal: { eq: [0, 0, 0, 0, 0], thresholds: [-25, -25, -24], ratios: [1.65, 1.7, 1.5], crossovers: [120, 2800], gain: 0.4 }
   };
   const FREQUENCIES = [60, 250, 1000, 4000, 12000];
-  const EQ_Q = [0.75, 0.85, 0.7, 0.8, 0.7];
+  const EQ_Q = [Math.SQRT1_2, 0.65, 0.65, 0.65, Math.SQRT1_2];
   const $ = (selector) => document.querySelector(selector);
   const $$ = (selector) => [...document.querySelectorAll(selector)];
+  const masteringEngine = window.SonoraAudioEngine;
+  if (!masteringEngine) throw new Error('Die lokale Mastering-Engine konnte nicht geladen werden.');
 
   const fileInput = $('#file-input');
   const uploadZone = $('#upload-zone');
@@ -38,11 +29,13 @@
   let decodedBuffer;
   let waveformPeaks;
   let currentObjectUrl;
-  let currentPreset = 'universal';
-  let eqValues = [...PRESETS[currentPreset].eq];
+  let eqValues = [...PRESETS.universal.eq];
+  let automaticEqValues = [...PRESETS.universal.eq];
+  const masterControls = { bass: 0, beatTone: 0, presence: 0, nasal: 0, resonances: 0, saturation: 0 };
+  let detectedResonances = [];
   let trimStartValue = 0;
   let trimEndValue = 1000;
-  let intensity = 58;
+  let intensity = 48;
   let bypass = false;
   let isSeeking = false;
   let animationFrame = 0;
@@ -208,12 +201,38 @@
 
   function updateAudioGraph() {
     if (!audioNodes) return;
-    const preset = PRESETS[currentPreset];
     const amount = bypass ? 0 : intensity / 100;
     const now = audioContext.currentTime;
     audioNodes.dryGain.gain.setTargetAtTime(1 - amount, now, 0.025);
     audioNodes.wetGain.gain.setTargetAtTime(amount, now, 0.025);
-    configureMasterChain(audioNodes.chain, preset, eqValues, amount, now);
+    configureMasterChain(audioNodes.chain, PRESETS.universal, getEffectiveEq(), amount, now, getMasterSettings());
+  }
+
+  function getMasterSettings() {
+    return { ...masterControls, resonancePeaks: detectedResonances };
+  }
+
+  function getEffectiveEq(controls = masterControls) {
+    const effective = [...eqValues];
+    effective[0] += controls.bass * 0.03;
+    effective[3] += controls.presence * 0.03;
+    effective[4] += controls.beatTone * 0.025;
+    return effective;
+  }
+
+  function updateMasterControlUI() {
+    for (const name of Object.keys(masterControls)) {
+      const input = $(`#${name}-control`);
+      const value = masterControls[name];
+      const range = Number(input.max) - Number(input.min);
+      const fill = ((value - Number(input.min)) / range) * 100;
+      input.value = String(value);
+      input.style.setProperty('--fill', `${fill}%`);
+      const percentageControls = ['saturation', 'nasal', 'resonances'];
+      $(`#${name}-value`).textContent = percentageControls.includes(name)
+        ? `${value}%`
+        : `${value > 0 ? '+' : ''}${value}`;
+    }
   }
 
   function updateIntensityUI() {
@@ -243,23 +262,20 @@
     drawEqGraph();
   }
 
-  function selectPreset(name) {
-    if (!PRESETS[name]) return;
-    currentPreset = name;
-    eqValues = [...PRESETS[name].eq];
-    $$('.preset-card').forEach((button) => {
-      const selected = button.dataset.preset === name;
-      button.classList.toggle('selected', selected);
-      button.setAttribute('aria-pressed', String(selected));
-    });
-    updateEqUI();
-    updateAudioGraph();
-  }
-
   function updateMonitorState() {
     const active = Boolean(decodedBuffer);
     $('#monitor-state').textContent = active ? 'SIGNAL BEREIT' : 'WARTET AUF TRACK';
     $('.monitor-state').classList.toggle('active', active);
+  }
+
+  function activateMasterTab(tab) {
+    $$('.master-tab').forEach((button) => {
+      const selected = button === tab;
+      button.setAttribute('aria-selected', String(selected));
+      button.tabIndex = selected ? 0 : -1;
+      button.classList.toggle('selected', selected);
+      $(`#${button.getAttribute('aria-controls')}`).hidden = !selected;
+    });
   }
 
   function drawWaveform() {
@@ -339,10 +355,11 @@
     });
 
     const activeAmount = bypass ? 0 : intensity / 100;
-    const responseAt = (frequency) => eqValues.reduce((sum, gain, index) => {
+    const responseAt = (frequency) => getEffectiveEq().reduce((sum, gain, index) => {
       const octaveDistance = Math.log2(frequency / FREQUENCIES[index]);
-      const spread = index < 2 ? 1.05 : 1.18;
-      return sum + gain * activeAmount * Math.exp(-0.5 * Math.pow(octaveDistance / spread, 2));
+      if (index === 0) return sum + gain * activeAmount / (1 + Math.exp(3 * octaveDistance));
+      if (index === 4) return sum + gain * activeAmount / (1 + Math.exp(-3 * octaveDistance));
+      return sum + gain * activeAmount * Math.exp(-0.5 * Math.pow(octaveDistance / 1.15, 2));
     }, 0);
     context.beginPath();
     for (let x = left; x <= right; x += 1) {
@@ -469,6 +486,8 @@
     $('#track-meta').textContent = `${formatFileSize(file.size)} · Audio wird analysiert`;
     uploadZone.hidden = true;
     trackCard.hidden = false;
+    $('#mastering-state').textContent = 'Analysiere deinen Song';
+    $('#mastering-summary').textContent = 'Tonbalance und Dynamik werden lokal ausgewertet.';
     $('#track-status').textContent = 'Audio wird vorbereitet ...';
     $('#export-button').disabled = true;
     playButton.disabled = true;
@@ -481,6 +500,7 @@
     player.classList.remove('playing');
     decodedBuffer = null;
     waveformPeaks = null;
+    detectedResonances = [];
     trimStartValue = 0;
     trimEndValue = 1000;
 
@@ -495,6 +515,23 @@
         .then((buffer) => {
           if (sequence !== loadSequence) return;
           decodedBuffer = buffer;
+          const features = masteringEngine.analyzeMix(buffer);
+          detectedResonances = masteringEngine.analyzeResonances(buffer);
+          const recommendation = masteringEngine.recommendAdaptiveMastering(features);
+          automaticEqValues = [...recommendation.eq];
+          eqValues = [...automaticEqValues];
+          for (const name of Object.keys(masterControls)) masterControls[name] = 0;
+          intensity = recommendation.intensity;
+          intensitySlider.value = String(intensity);
+          $('#mastering-state').textContent = 'Automatisch auf diesen Track angepasst';
+          $('#mastering-summary').textContent = recommendation.summary;
+          $('#resonance-summary').textContent = detectedResonances.length
+            ? `${detectedResonances.length} schmale Resonanzbereiche im Mix gefunden.`
+            : 'Keine deutlich herausstehenden Resonanzspitzen gefunden.';
+          updateIntensityUI();
+          updateMasterControlUI();
+          updateEqUI();
+          updateAudioGraph();
           waveformPeaks = buildWaveformPeaks(buffer);
           $('#track-meta').textContent = `${formatFileSize(file.size)} · ${buffer.numberOfChannels === 1 ? 'Mono' : 'Stereo'} · ${Math.round(buffer.sampleRate / 1000)} kHz`;
           $('#track-status').textContent = `${formatTime(buffer.duration)} · Bereit für den Feinschliff`;
@@ -519,6 +556,8 @@
           trimEndSlider.disabled = true;
           $('#track-meta').textContent = `${formatFileSize(file.size)} · Nicht unterstützt`;
           $('#track-status').textContent = 'Datei konnte nicht dekodiert werden';
+          $('#mastering-state').textContent = 'Analyse nicht möglich';
+          $('#mastering-summary').textContent = 'Bitte probiere eine andere Audiodatei.';
           setStatus('Diese Audiodatei kann in deinem Browser nicht geöffnet werden. Versuche es mit WAV oder MP3.');
           updateMonitorState();
         });
@@ -555,7 +594,7 @@
       return source;
     }
     const chain = createMasterChain(context, source, context.destination);
-    configureMasterChain(chain, settings.preset, settings.eq, settings.intensity, 0);
+    configureMasterChain(chain, settings.preset, settings.eq, settings.intensity, 0, settings.controls);
     return source;
   }
 
@@ -567,7 +606,7 @@
 
     const equalizers = FREQUENCIES.map((frequency, index) => {
       const filter = context.createBiquadFilter();
-      filter.type = 'peaking';
+      filter.type = index === 0 ? 'lowshelf' : index === FREQUENCIES.length - 1 ? 'highshelf' : 'peaking';
       filter.frequency.value = frequency;
       filter.Q.value = EQ_Q[index];
       return filter;
@@ -578,6 +617,26 @@
       equalized.connect(filter);
       equalized = filter;
     }
+
+    const nasalFilters = [];
+    for (const frequency of [850, 1250]) {
+      const filter = context.createBiquadFilter();
+      filter.type = 'peaking';
+      filter.frequency.value = frequency;
+      filter.Q.value = 1.4;
+      equalized.connect(filter);
+      equalized = filter;
+      nasalFilters.push(filter);
+    }
+    const resonanceFilters = Array.from({ length: 4 }, () => {
+      const filter = context.createBiquadFilter();
+      filter.type = 'peaking';
+      filter.frequency.value = 4000;
+      filter.Q.value = 7;
+      equalized.connect(filter);
+      equalized = filter;
+      return filter;
+    });
 
     const makePair = (type) => [0, 1].map(() => {
       const filter = context.createBiquadFilter();
@@ -596,6 +655,8 @@
     });
     const sum = context.createGain();
     const masterGain = context.createGain();
+    const saturation = context.createWaveShaper();
+    saturation.oversample = '4x';
     const limiter = context.createDynamicsCompressor();
     limiter.threshold.value = -1.5;
     limiter.knee.value = 0;
@@ -630,18 +691,32 @@
 
     compressors.forEach((compressor) => compressor.connect(sum));
     sum.connect(masterGain);
-    masterGain.connect(limiter);
+    masterGain.connect(saturation);
+    saturation.connect(limiter);
     const output = destination ?? context.createGain();
     limiter.connect(output);
     return {
       output,
       highpass,
       equalizers,
+      nasalFilters,
+      resonanceFilters,
       crossovers: [lowPasses, lowHighPasses, midLowPasses, highPasses],
       compressors,
       masterGain,
+      saturation,
       limiter
     };
+  }
+
+  function createSaturationCurve(amount, userSaturation) {
+    const curve = new Float32Array(4096);
+    const strength = Math.min(1, amount * 0.08 + userSaturation / 100);
+    for (let index = 0; index < curve.length; index += 1) {
+      const sample = (index * 2) / (curve.length - 1) - 1;
+      curve[index] = sample - strength * sample ** 3 * 0.2;
+    }
+    return curve;
   }
 
   function setAudioParam(parameter, value, time) {
@@ -652,9 +727,22 @@
     }
   }
 
-  function configureMasterChain(chain, preset, eq, amount, time = null) {
+  function configureMasterChain(chain, preset, eq, amount, time = null, controls = getMasterSettings()) {
     chain.equalizers.forEach((filter, index) => {
       setAudioParam(filter.gain, eq[index] * amount, time);
+    });
+    chain.nasalFilters.forEach((filter, index) => {
+      const depth = controls.nasal / 100;
+      setAudioParam(filter.gain, -[2.5, 2][index] * depth, time);
+    });
+    chain.resonanceFilters.forEach((filter, index) => {
+      const peak = controls.resonancePeaks[index];
+      if (peak) {
+        setAudioParam(filter.frequency, peak.frequency, time);
+        setAudioParam(filter.gain, -Math.min(6, peak.prominenceDb * 0.45) * (controls.resonances / 100), time);
+      } else {
+        setAudioParam(filter.gain, 0, time);
+      }
     });
 
     const [lowCrossover, highCrossover] = preset.crossovers;
@@ -663,61 +751,19 @@
       stages.forEach((filter) => setAudioParam(filter.frequency, frequency, time));
     });
     chain.compressors.forEach((compressor, index) => {
-      setAudioParam(compressor.threshold, -18 + (preset.thresholds[index] + 18) * amount, time);
-      setAudioParam(compressor.ratio, 1 + (preset.ratios[index] - 1) * amount, time);
-      compressor.attack.value = index === 0 ? 0.025 : index === 1 ? 0.012 : 0.006;
-      compressor.release.value = index === 0 ? 0.18 : index === 1 ? 0.12 : 0.085;
+      const threshold = index === 2
+        ? -18 - 7 * amount
+        : -18 + (preset.thresholds[index] + 18) * amount;
+      const ratio = 1 + (preset.ratios[index] - 1) * amount * (index === 2 ? 1.5 : 1);
+      setAudioParam(compressor.threshold, threshold, time);
+      setAudioParam(compressor.ratio, ratio, time);
+      compressor.knee.value = index === 2 ? 18 : 12;
+      compressor.attack.value = index === 0 ? 0.03 : index === 1 ? 0.012 : 0.004;
+      compressor.release.value = index === 0 ? 0.2 : index === 1 ? 0.12 : 0.075;
     });
     setAudioParam(chain.masterGain.gain, dbToGain(preset.gain * amount), time);
+    chain.saturation.curve = createSaturationCurve(amount, controls.saturation);
     chain.limiter.threshold.value = -1.5;
-  }
-
-  function measureAudio(buffer) {
-    const blockSize = Math.max(1, Math.round(buffer.sampleRate * 0.1));
-    const channels = Array.from({ length: buffer.numberOfChannels }, (_, index) => buffer.getChannelData(index));
-    let totalPower = 0;
-    let activeFrames = 0;
-    let peak = 0;
-    for (let start = 0; start < buffer.length; start += blockSize) {
-      const end = Math.min(start + blockSize, buffer.length);
-      let blockPower = 0;
-      for (const channel of channels) {
-        for (let frame = start; frame < end; frame += 1) {
-          const sample = channel[frame];
-          const absolute = Math.abs(sample);
-          if (absolute > peak) peak = absolute;
-          blockPower += sample * sample;
-        }
-      }
-      const blockFrames = (end - start) * channels.length;
-      const blockRms = Math.sqrt(blockPower / blockFrames);
-      if (blockRms >= 0.001) {
-        totalPower += blockPower;
-        activeFrames += blockFrames;
-      }
-    }
-    return {
-      rmsDb: activeFrames ? 10 * Math.log10(totalPower / activeFrames) : -Infinity,
-      peak
-    };
-  }
-
-  function applyOutputLevel(buffer) {
-    const input = measureAudio(buffer);
-    if (!Number.isFinite(input.rmsDb) || input.peak === 0) {
-      throw new Error('Der gerenderte Master enthält kein messbares Audiosignal.');
-    }
-    const loudnessGain = Math.max(-12, Math.min(12, -16 - input.rmsDb));
-    const peakGain = 20 * Math.log10(10 ** (-1 / 20) / input.peak);
-    const gainDb = Math.min(loudnessGain, peakGain);
-    const gain = dbToGain(gainDb);
-    for (let channelIndex = 0; channelIndex < buffer.numberOfChannels; channelIndex += 1) {
-      const channel = buffer.getChannelData(channelIndex);
-      for (let frame = 0; frame < channel.length; frame += 1) {
-        channel[frame] *= gain;
-      }
-    }
-    return { gainDb, ...measureAudio(buffer) };
   }
 
   function encodeWav(buffer) {
@@ -785,17 +831,19 @@
       const trimStartSeconds = trimRange.startFrame / decodedBuffer.sampleRate;
       const trimDurationSeconds = (trimRange.endFrame - trimRange.startFrame) / decodedBuffer.sampleRate;
       const source = makeOfflineGraph(context, decodedBuffer, {
-        preset: PRESETS[currentPreset],
-        eq: [...eqValues],
+        preset: PRESETS.universal,
+        eq: getEffectiveEq(),
+        controls: getMasterSettings(),
         intensity: intensity / 100,
         bypass
       }, trimStartSeconds, trimDurationSeconds);
       source.start(0, trimStartSeconds, trimDurationSeconds);
       const isTrimmed = trimRange.startFrame !== 0 || trimRange.endFrame !== decodedBuffer.length;
       const rendered = await context.startRendering();
-      const level = bypass || intensity === 0 || !Number.isFinite(measureAudio(rendered).rmsDb)
-        ? { gainDb: 0, ...measureAudio(rendered) }
-        : applyOutputLevel(rendered);
+      const dryComparison = bypass;
+      const level = dryComparison
+        ? masteringEngine.measureLoudness(rendered)
+        : masteringEngine.applyOutputLevel(rendered);
       const blob = encodeWav(rendered);
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -808,19 +856,24 @@
       link.click();
       link.remove();
       window.setTimeout(() => URL.revokeObjectURL(url), 30000);
-      const peakDb = 20 * Math.log10(level.peak);
-      const levelMessage = bypass || intensity === 0
+      const peakDb = 20 * Math.log10(level.samplePeak);
+      const levelMessage = dryComparison
         ? 'Dry-Vergleich'
-        : !Number.isFinite(level.rmsDb)
+        : !Number.isFinite(level.integratedLufs)
           ? 'kein Signal zum Normalisieren'
         : Math.abs(level.gainDb) < 0.05
         ? 'Pegel bereits passend'
         : `Pegel ${level.gainDb > 0 ? '+' : ''}${level.gainDb.toFixed(1)} dB`;
       const measuredPeak = Number.isFinite(peakDb) ? `${peakDb.toFixed(1)} dBFS` : 'kein Signal';
-      setStatus(`Fertig: 24-Bit-WAV · ${Math.round(rendered.sampleRate / 1000)} kHz · ${levelMessage} · Peak ${measuredPeak}.`);
+      const loudnessMessage = Number.isFinite(level.integratedLufs) ? ` · ${level.integratedLufs.toFixed(1)} LUFS` : '';
+      const truePeakMessage = Number.isFinite(level.truePeakDb) ? ` · ${level.truePeakDb.toFixed(1)} dBTP` : '';
+      setStatus(`Fertig: 24-Bit-WAV · ${Math.round(rendered.sampleRate / 1000)} kHz · ${levelMessage}${loudnessMessage} · Peak ${measuredPeak}${truePeakMessage}.`);
     } catch (error) {
       console.error('Master-Export fehlgeschlagen:', error);
-      setStatus('Der Export ist fehlgeschlagen. Bei sehr langen Tracks hilft es, eine kürzere Datei oder WAV zu verwenden.');
+      const message = error instanceof Error && error.message
+        ? error.message
+        : 'Bei sehr langen Tracks hilft es, eine kürzere Datei oder WAV zu verwenden.';
+      setStatus(`Der Export ist fehlgeschlagen: ${message}`);
     } finally {
       button.disabled = !decodedBuffer;
       button.innerHTML = originalContent;
@@ -879,15 +932,32 @@
   document.addEventListener('dragover', (event) => event.preventDefault());
   document.addEventListener('drop', (event) => event.preventDefault());
 
-  $$('.preset-card').forEach((button) => {
-    button.addEventListener('click', () => selectPreset(button.dataset.preset));
+  $$('.master-tab').forEach((tab, index, tabs) => {
+    tab.addEventListener('click', () => activateMasterTab(tab));
+    tab.addEventListener('keydown', (event) => {
+      const direction = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
+      if (!direction) return;
+      event.preventDefault();
+      const next = tabs[(index + direction + tabs.length) % tabs.length];
+      activateMasterTab(next);
+      next.focus();
+    });
   });
+
   intensitySlider.addEventListener('input', () => {
     intensity = Number(intensitySlider.value);
     updateIntensityUI();
     updateAudioGraph();
     drawEqGraph();
   });
+  for (const name of Object.keys(masterControls)) {
+    $(`#${name}-control`).addEventListener('input', (event) => {
+      masterControls[name] = Number(event.currentTarget.value);
+      updateMasterControlUI();
+      updateAudioGraph();
+      drawEqGraph();
+    });
+  }
   eqSliders.forEach((slider) => {
     slider.addEventListener('input', () => {
       eqValues[Number(slider.dataset.band)] = Number(slider.value);
@@ -896,7 +966,7 @@
     });
   });
   $('#reset-eq').addEventListener('click', () => {
-    eqValues = [...PRESETS[currentPreset].eq];
+    eqValues = [...automaticEqValues];
     updateEqUI();
     updateAudioGraph();
   });
@@ -964,5 +1034,6 @@
 
   setColorTheme(document.documentElement.dataset.theme || 'light');
   updateIntensityUI();
+  updateMasterControlUI();
   updateEqUI();
 })();

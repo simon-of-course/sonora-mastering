@@ -44,7 +44,7 @@
           <div>
             <div class="eyebrow">AUDIO · MASTERING</div>
             <h1>Dein Track. <span>Dein Master.</span></h1>
-            <p class="intro-copy">Lade einen Song hoch, wähle einen Sound und vergleiche das Ergebnis direkt.</p>
+            <p class="intro-copy">Lade deinen Song hoch und erhalte ein automatisch auf seine Tonbalance und Dynamik abgestimmtes Master.</p>
           </div>
           <div class="privacy-note">
             <span class="privacy-icon" aria-hidden="true">
@@ -122,9 +122,9 @@
             <div class="signal-card">
               <div class="signal-top"><span class="signal-label">MASTERING-KETTE</span></div>
               <div class="signal-flow">
-                <span>EQ</span><b></b><span>MEHRBAND</span><b></b><span>LIMITER</span>
+                <span>EQ</span><b></b><span>MEHRBAND</span><b></b><span>SÄTTIGUNG</span><b></b><span>LIMITER</span>
               </div>
-              <p>Sanfte Klangformung und Kontrolle der Dynamik.</p>
+              <p>Präsenz und Bass werden im Stereomix behutsam geformt; die Stimme wird nicht separat isoliert.</p>
             </div>
           </article>
 
@@ -135,69 +135,67 @@
                 <h2>Mastering</h2>
               </div>
             </div>
-            <div class="presets-heading">
-              <span>Preset wählen</span>
-              <span class="micro-label">12 SOUNDS</span>
-            </div>
-            <div class="preset-grid" role="group" aria-label="Mastering Preset">
-              <button class="preset-card selected" type="button" data-preset="universal" aria-pressed="true">
-                <span class="preset-index">01</span><strong>Universal</strong><small>Ausgewogen</small>
-                <span class="selected-check" aria-hidden="true">✓</span>
-              </button>
-              <button class="preset-card" type="button" data-preset="fire" aria-pressed="false">
-                <span class="preset-index">02</span><strong>Fire</strong><small>Druckvoll & präsent</small>
-                <span class="selected-check" aria-hidden="true">✓</span>
-              </button>
-              <button class="preset-card" type="button" data-preset="clarity" aria-pressed="false">
-                <span class="preset-index">03</span><strong>Clarity</strong><small>Hell & klar</small>
-                <span class="selected-check" aria-hidden="true">✓</span>
-              </button>
-              <button class="preset-card" type="button" data-preset="tape" aria-pressed="false">
-                <span class="preset-index">04</span><strong>Tape</strong><small>Warm & abgerundet</small>
-                <span class="selected-check" aria-hidden="true">✓</span>
-              </button>
-              <button class="preset-card" type="button" data-preset="natural" aria-pressed="false">
-                <span class="preset-index">05</span><strong>Natural</strong><small>Sanft & transparent</small>
-                <span class="selected-check" aria-hidden="true">✓</span>
-              </button>
-              <button class="preset-card" type="button" data-preset="cinematic" aria-pressed="false">
-                <span class="preset-index">06</span><strong>Cinematic</strong><small>Weit & dynamisch</small>
-                <span class="selected-check" aria-hidden="true">✓</span>
-              </button>
-              <button class="preset-card" type="button" data-preset="bass" aria-pressed="false">
-                <span class="preset-index">07</span><strong>Bass</strong><small>Tief & kontrolliert</small>
-                <span class="selected-check" aria-hidden="true">✓</span>
-              </button>
-              <button class="preset-card" type="button" data-preset="punch" aria-pressed="false">
-                <span class="preset-index">08</span><strong>Punch</strong><small>Direkt & perkussiv</small>
-                <span class="selected-check" aria-hidden="true">✓</span>
-              </button>
-              <button class="preset-card" type="button" data-preset="warm" aria-pressed="false">
-                <span class="preset-index">09</span><strong>Warm</strong><small>Rund & voll</small>
-                <span class="selected-check" aria-hidden="true">✓</span>
-              </button>
-              <button class="preset-card" type="button" data-preset="open" aria-pressed="false">
-                <span class="preset-index">10</span><strong>Open</strong><small>Luftig & weit</small>
-                <span class="selected-check" aria-hidden="true">✓</span>
-              </button>
-              <button class="preset-card" type="button" data-preset="vocal" aria-pressed="false">
-                <span class="preset-index">11</span><strong>Vocal</strong><small>Stimme im Fokus</small>
-                <span class="selected-check" aria-hidden="true">✓</span>
-              </button>
-              <button class="preset-card" type="button" data-preset="lowend" aria-pressed="false">
-                <span class="preset-index">12</span><strong>Low-end control</strong><small>Fester Bassbereich</small>
-                <span class="selected-check" aria-hidden="true">✓</span>
-              </button>
+            <div class="automatic-mastering" aria-live="polite">
+              <span class="automatic-mark" aria-hidden="true">AUTO</span>
+              <span><strong id="mastering-state">Warte auf deinen Song</strong><small id="mastering-summary">Tonbalance und Dynamik werden lokal analysiert.</small></span>
             </div>
 
-            <div class="intensity-card">
-              <div class="intensity-heading">
-                <div><span class="section-kicker">INTENSITÄT</span><strong id="intensity-value">58<span>%</span></strong></div>
-                <span id="intensity-description" class="intensity-description">Moderat</span>
-              </div>
-              <input id="intensity" class="intensity-slider" type="range" min="0" max="100" value="58" aria-label="Mastering Intensität">
-              <div class="slider-labels"><span>LEICHT</span><span>STARK</span></div>
+            <div class="master-tabs" role="tablist" aria-label="Mastering-Bereiche">
+              <button id="tab-vocal" class="master-tab" type="button" role="tab" aria-selected="false" aria-controls="panel-vocal" tabindex="-1">Vocal</button>
+              <button id="tab-beat" class="master-tab" type="button" role="tab" aria-selected="false" aria-controls="panel-beat" tabindex="-1">Beat</button>
+              <button id="tab-master" class="master-tab selected" type="button" role="tab" aria-selected="true" aria-controls="panel-master" tabindex="0">Main Master</button>
             </div>
+            <section id="panel-vocal" class="master-tab-panel" role="tabpanel" aria-labelledby="tab-vocal" hidden>
+              <div class="master-control-group" aria-label="Stimmen-Klangregler">
+                <span class="master-control-heading">VOCAL-FEINSCHLIFF</span>
+                <label class="master-control">
+                  <span>Nasalität reduzieren <output id="nasal-value" for="nasal-control">0%</output></span>
+                  <input id="nasal-control" class="master-control-slider" type="range" min="0" max="100" value="0" aria-label="Nasalität im mittleren Frequenzbereich reduzieren">
+                </label>
+                <label class="master-control">
+                  <span>Schrille Resonanzen reduzieren <output id="resonances-value" for="resonances-control">0%</output></span>
+                  <input id="resonances-control" class="master-control-slider" type="range" min="0" max="100" value="0" aria-label="Erkannte schrille Resonanzen reduzieren">
+                </label>
+                <small id="resonance-summary" class="master-control-note">Resonanzen werden nach dem Laden des Songs analysiert.</small>
+                <label class="master-control">
+                  <span>Stimmen-Präsenz <output id="presence-value" for="presence-control">+0</output></span>
+                  <input id="presence-control" class="master-control-slider" type="range" min="-50" max="50" value="0" aria-label="Stimmen-Präsenz im mittleren Höhenbereich anpassen">
+                </label>
+                <p class="master-control-note">Diese Regler formen passende Frequenzen im Gesamtmix; ohne getrennte Vocal-Spur können sie auch den Beat beeinflussen.</p>
+              </div>
+            </section>
+            <section id="panel-beat" class="master-tab-panel" role="tabpanel" aria-labelledby="tab-beat" hidden>
+              <div class="master-control-group" aria-label="Beat-Klangregler">
+                <span class="master-control-heading">BEAT-FEINSCHLIFF</span>
+                <label class="master-control">
+                  <span>Bassanteil <output id="bass-value" for="bass-control">+0</output></span>
+                  <input id="bass-control" class="master-control-slider" type="range" min="-50" max="50" value="0" aria-label="Bass im Beatbereich anheben oder absenken">
+                </label>
+                <label class="master-control">
+                  <span>Beat-Höhen <output id="beatTone-value" for="beatTone-control">+0</output></span>
+                  <input id="beatTone-control" class="master-control-slider" type="range" min="-50" max="50" value="0" aria-label="Höhen im Beatbereich anheben oder absenken">
+                </label>
+                <p class="master-control-note">Die Klangregler wirken auf Frequenzbereiche im Stereo-Mix und trennen den Beat nicht von der Stimme.</p>
+              </div>
+            </section>
+            <section id="panel-master" class="master-tab-panel" role="tabpanel" aria-labelledby="tab-master">
+              <div class="intensity-card">
+                <div class="intensity-heading">
+                  <div><span class="section-kicker">MASTERING-STÄRKE</span><strong id="intensity-value">48<span>%</span></strong></div>
+                  <span id="intensity-description" class="intensity-description">Moderat</span>
+                </div>
+                <input id="intensity" class="intensity-slider" type="range" min="0" max="100" value="48" aria-label="Mastering-Stärke">
+                <div class="slider-labels"><span>LEICHT</span><span>STARK</span></div>
+              </div>
+              <div class="master-control-group" aria-label="Main-Master-Regler">
+                <span class="master-control-heading">MAIN MASTER</span>
+                <label class="master-control">
+                  <span>Sättigung / Distortion <output id="saturation-value" for="saturation-control">0%</output></span>
+                  <input id="saturation-control" class="master-control-slider" type="range" min="0" max="100" value="0" aria-label="Sättigung und harmonische Verzerrung des Gesamtmixes">
+                </label>
+                <p class="master-control-note">Sättigung fügt dem gesamten Mix harmonische Verzerrung hinzu. Starte niedrig und vergleiche mit dem Original.</p>
+              </div>
+            </section>
             <div class="master-footer">
               <span>Mit automatischer Pegelanpassung, ohne unnötiges Clipping.</span>
               <button id="ab-button" class="ab-button" type="button" aria-pressed="false" disabled><span>A</span><i>/</i><span>B</span> <small>VERGLEICH</small></button>
@@ -210,7 +208,7 @@
                 <span class="section-kicker">MANUELL ANPASSEN</span>
                 <h2>Equalizer</h2>
               </div>
-              <button id="reset-eq" class="text-button" type="button" title="EQ auf Preset zurücksetzen">RESET</button>
+              <button id="reset-eq" class="text-button" type="button" title="Automatische EQ-Anpassung wiederherstellen">AUTO</button>
             </div>
             <div class="eq-graph-wrap">
               <canvas id="eq-graph" aria-label="EQ Frequenzgang"></canvas>
@@ -218,22 +216,22 @@
             <div class="eq-controls" role="group" aria-label="5-Band Equalizer">
               <label class="eq-band">
                 <span class="eq-db" id="eq-value-0">0.0</span>
-                <input class="eq-slider" data-band="0" type="range" min="-8" max="8" step="0.5" value="0" aria-label="EQ Sub Bass">
+                <input class="eq-slider" data-band="0" type="range" min="-8" max="8" step="0.5" value="0" aria-label="EQ Tiefbass-Bereich">
                 <span class="eq-freq">60<small>Hz</small></span>
               </label>
               <label class="eq-band">
                 <span class="eq-db" id="eq-value-1">0.0</span>
-                <input class="eq-slider" data-band="1" type="range" min="-8" max="8" step="0.5" value="0" aria-label="EQ Bass">
+                <input class="eq-slider" data-band="1" type="range" min="-8" max="8" step="0.5" value="0" aria-label="EQ Bass- und Wärmebereich">
                 <span class="eq-freq">250<small>Hz</small></span>
               </label>
               <label class="eq-band">
                 <span class="eq-db" id="eq-value-2">0.0</span>
-                <input class="eq-slider" data-band="2" type="range" min="-8" max="8" step="0.5" value="0" aria-label="EQ Mitten">
+                <input class="eq-slider" data-band="2" type="range" min="-8" max="8" step="0.5" value="0" aria-label="EQ Mitten- und Körperbereich">
                 <span class="eq-freq">1<small>kHz</small></span>
               </label>
               <label class="eq-band">
                 <span class="eq-db" id="eq-value-3">0.0</span>
-                <input class="eq-slider" data-band="3" type="range" min="-8" max="8" step="0.5" value="0" aria-label="EQ Präsenz">
+                <input class="eq-slider" data-band="3" type="range" min="-8" max="8" step="0.5" value="0" aria-label="EQ Stimmen-Präsenzbereich">
                 <span class="eq-freq">4<small>kHz</small></span>
               </label>
               <label class="eq-band">
@@ -264,14 +262,15 @@
               <span class="meter-label">L</span><div class="meter-track"><span id="meter-left" class="meter-fill"></span><i class="meter-marker"></i></div>
               <span class="meter-label">R</span><div class="meter-track"><span id="meter-right" class="meter-fill meter-right"></span><i class="meter-marker"></i></div>
             </div>
-            <div class="target-note"><span>PEAK-ZIEL</span> <strong>−1,0 dBFS</strong></div>
+            <div class="target-note"><span>LOUDNESS-ZIEL</span> <strong>−9 LUFS · −1 dBTP</strong></div>
           </article>
         </section>
         <p id="status-message" class="status-message" role="status" aria-live="polite"></p>
         <audio id="audio-player" preload="metadata"></audio>
       </main>
-      <footer class="app-footer"><span>SONORA AUDIO</span><span>EQ · MEHRBAND-DYNAMIK · PEGELANPASSUNG</span><span>LOKAL IM BROWSER</span></footer>
+      <footer class="app-footer"><span>SONORA AUDIO</span><span>EQ · MEHRBAND-DYNAMIK · SÄTTIGUNG · LIMITING</span><span>LOKAL IM BROWSER</span></footer>
     </div>
+    <script src="audio-engine.js"></script>
     <script src="app.js"></script>
   </body>
 </html>
