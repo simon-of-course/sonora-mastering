@@ -241,6 +241,8 @@ h1 > span { color: var(--accent); }
 .status-message { min-height: 18px; margin: 8px 2px 0; color: #73561c; font-size: 10px; }
 .status-message:empty { display: none; }
 .app-footer { display: flex; justify-content: space-between; margin-top: 10px; padding: 11px 0 14px; border-top: 1px solid var(--body-border); color: var(--muted); font-size: 8px; }
+.plugin-download { color: var(--accent); text-decoration: none; }
+.plugin-download:hover { text-decoration: underline; }
 #audio-player { display: none; }
 button:focus-visible, input:focus-visible { outline: 2px solid var(--accent-outline); outline-offset: 3px; }
 
