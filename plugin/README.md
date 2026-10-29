@@ -6,7 +6,7 @@ SONORA Master is an experimental Windows VST3 bus processor for FL Studio. The i
 
 - [Download SONORA Master VST3](https://github.com/simon-of-course/sonora-mastering/releases/latest/download/SONORA_Master.vst3.zip).
 - [Download SONORA Shutter VST3](https://github.com/simon-of-course/sonora-mastering/releases/latest/download/SONORA_Shutter.vst3.zip).
-- [Download SONORA Shutter VST3](https://github.com/simon-of-course/sonora-mastering/releases/latest/download/SONORA_Shutter.vst3.zip).
+- [Download SONORA Drowner VST3](https://github.com/simon-of-course/sonora-mastering/releases/latest/download/SONORA_Drowner.vst3.zip).
 
 1. Extract the ZIP file.
 2. Copy the complete `SONORA_Master.vst3` folder to `%CommonProgramFiles%\VST3` (usually `C:\Program Files\Common Files\VST3`).
@@ -57,3 +57,9 @@ The separate SONORA Shutter VST3 is an automated vocal gate effect. Put it direc
 Tempo Sync follows the DAW tempo and musical play position. Choose a straight note value from whole note through 1/32, or a triplet value. With Sync off, use the Rate control for a free-running 0.5–20 Hz shutter. Depth sets how far the gated half-cycle is reduced, Mix blends the effect, and Glattung softens transitions to help avoid clicks. Stopping playback returns the signal to dry.
 
 Build the separate effect with `cmake --build build --config Release --target SONORA_Shutter`. The bundle is `build\VST3\Release\SONORA_Shutter.vst3`. An HTML interface preview is available at [resource/shutter-preview.html](./resource/shutter-preview.html).
+
+## SONORA Drowner
+
+SONORA Drowner is a continuous underwater low-pass effect for vocals. Automate **Unterwasser-Anteil** from zero for a natural vocal to a fully muffled underwater tone. When the automated amount comes back down, the filter recovers gradually; **Auftauchzeit** adjusts the return from 0.2 to 6 seconds. The parameter automation can also be drawn gradually in the DAW. The plugin does not add reverb or artificial water noises.
+
+Build it with `cmake --build build --config Release --target SONORA_Drowner`. The bundle is `build\VST3\Release\SONORA_Drowner.vst3`. An HTML interface preview is available at [resource/drowner-preview.html](./resource/drowner-preview.html).

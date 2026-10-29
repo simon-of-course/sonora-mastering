@@ -71,3 +71,20 @@ target_sources(SONORA_Shutter
 target_compile_features(SONORA_Shutter PRIVATE cxx_std_17)
 target_link_libraries(SONORA_Shutter PRIVATE sdk vstgui_support)
 target_include_directories(SONORA_Shutter PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+smtg_add_vst3plugin(SONORA_Drowner
+    src/sonora_drowner.cpp
+)
+smtg_target_configure_version_file(SONORA_Drowner)
+smtg_target_add_plugin_resources(SONORA_Drowner
+    RESOURCES
+        resource/drowner.uidesc
+)
+target_sources(SONORA_Drowner
+    PRIVATE
+        ${vst3sdk_SOURCE_DIR}/public.sdk/source/main/dllmain.cpp
+        ${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/vstsinglecomponenteffect.cpp
+)
+target_compile_features(SONORA_Drowner PRIVATE cxx_std_17)
+target_link_libraries(SONORA_Drowner PRIVATE sdk vstgui_support)
+target_include_directories(SONORA_Drowner PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
