@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<vstgui-ui-description version="1">
+  <template class="CViewContainer" name="view" size="780, 810" minSize="780, 810" maxSize="780, 810" background-color="#f4f2f7ff" background-color-draw-style="filled" transparent="false">
+    <view class="CTextLabel" origin="28, 18" size="240, 30" title="sonora / master" font="~ NormalFontVeryBig" font-color="#242329ff" text-alignment="left" transparent="true"/>
+    <view class="CTextLabel" origin="28, 54" size="500, 18" title="NATUERLICH. PRAEZISE. DEIN SOUND." font="~ NormalFontSmall" font-color="#76737bff" text-alignment="left" transparent="true"/>
+
+    <view class="CTextLabel" origin="28, 89" size="135, 18" title="BUS-MODUS" font="~ NormalFontSmall" font-color="#76737bff" text-alignment="left" transparent="true"/>
+    <view class="COptionMenu" name="mode-selector" control-tag="Root::Mode" origin="28, 111" size="260, 36" menu-popup-style="true" font-color="#242329ff" back-color="#ffffffff" frame-color="#e7e5e1ff" min-value="0" max-value="1" default-value="1"/>
+    <view class="CTextLabel" origin="306, 119" size="435, 24" title="Vocal-Sidechain zum Beat-Bus steuert die dynamische Praesenzabsenkung." font="~ NormalFontSmall" font-color="#76737bff" text-alignment="left" transparent="true"/>
+
+    <view class="CViewContainer" name="master-panel" origin="28, 165" size="724, 617" background-color="#f4f2f7ff" background-color-draw-style="filled" transparent="false">
+      <view class="CViewContainer" name="hero-surface" origin="12, 12" size="700, 154" background-color="#ffffffff" background-color-draw-style="filled" transparent="false"/>
+      <view class="CViewContainer" name="tone-surface" origin="12, 174" size="700, 130" background-color="#faf8fdff" background-color-draw-style="filled" transparent="false"/>
+      <view class="CViewContainer" name="eq-surface" origin="12, 312" size="700, 293" background-color="#ffffffff" background-color-draw-style="filled" transparent="false"/>
+
+      <view class="CTextLabel" origin="20, 17" size="220, 18" title="KLANGFORMUNG" font="~ NormalFontSmall" font-color="#6546a3ff" text-alignment="left" transparent="true"/>
+      <view class="CTextLabel" origin="20, 38" size="250, 22" title="Main Master" font="~ NormalFontVeryBig" font-color="#242329ff" text-alignment="left" transparent="true"/>
+
+      <view class="CTextLabel" origin="20, 78" size="130, 18" title="PRESET" font="~ NormalFontSmall" font-color="#76737bff" text-alignment="left" transparent="true"/>
+      <view class="COptionMenu" control-tag="Root::Preset" origin="20, 100" size="300, 34" menu-popup-style="true" font-color="#242329ff" back-color="#ffffffff" frame-color="#e7e5e1ff" min-value="0" max-value="1" default-value="0"/>
+
+      <view class="CTextLabel" origin="344, 74" size="120, 18" title="MASTERING-STAERKE" font="~ NormalFontSmall" font-color="#76737bff" text-alignment="center" transparent="true"/>
+      <view class="CKnob" control-tag="Root::Amount" origin="370, 92" size="68, 68" min-value="0" max-value="1" default-value="0.3" angle-start="135" angle-range="270" circle-drawing="false" corona-drawing="true" corona-from-center="false" corona-dash-dot="false" corona-outline="true" corona-line-cap-butt="false" corona-inset="8" corona-outline-width-add="1.5" skip-handle-drawing="false" corona-color="#6546a3ff" handle-color="#6546a3ff" handle-shadow-color="#aaa6aeff" handle-line-width="8" value-inset="8" draw-value="false" zoom-factor="1.7" wheel-inc-value="0.01"/>
+      <view class="CTextLabel" origin="456, 74" size="112, 18" title="VOCAL-FOKUS" font="~ NormalFontSmall" font-color="#76737bff" text-alignment="center" transparent="true"/>
+      <view class="CKnob" control-tag="Root::VocalFocus" origin="480, 92" size="64, 64" min-value="0" max-value="1" default-value="0.5" angle-start="135" angle-range="270" circle-drawing="false" corona-drawing="true" corona-from-center="false" corona-dash-dot="false" corona-outline="true" corona-line-cap-butt="false" corona-inset="7" corona-outline-width-add="1.5" skip-handle-drawing="false" corona-color="#6546a3ff" handle-color="#6546a3ff" handle-shadow-color="#aaa6aeff" handle-line-width="6" value-inset="7" zoom-factor="1.7" wheel-inc-value="0.01"/>
+      <view class="CTextLabel" origin="566, 74" size="120, 18" title="AUSGANGSPEGEL" font="~ NormalFontSmall" font-color="#76737bff" text-alignment="center" transparent="true"/>
+      <view class="CKnob" control-tag="Root::Output" origin="592, 92" size="64, 64" min-value="0" max-value="1" default-value="0.5" angle-start="135" angle-range="270" circle-drawing="false" corona-drawing="true" corona-from-center="false" corona-dash-dot="false" corona-outline="true" corona-line-cap-butt="false" corona-inset="7" corona-outline-width-add="1.5" skip-handle-drawing="false" corona-color="#6546a3ff" handle-color="#6546a3ff" handle-shadow-color="#aaa6aeff" handle-line-width="6" value-inset="7" zoom-factor="1.7" wheel-inc-value="0.01"/>
+      <view class="CCheckBox" control-tag="Root::Bypass" origin="660, 119" size="55, 24" title="Bypass" font="~ NormalFontSmall" font-color="#242329ff" boxframe-color="#dedbe2ff" boxfill-color="#ffffffff" checkmark-color="#6546a3ff"/>
+
+      <view class="CTextLabel" origin="20, 180" size="300, 18" title="VOCAL-FEINSCHLIFF" font="~ NormalFontSmall" font-color="#6546a3ff" text-alignment="left" transparent="true"/>
+      <view class="CTextLabel" origin="368, 180" size="300, 18" title="BEAT + MASTER" font="~ NormalFontSmall" font-color="#6546a3ff" text-alignment="left" transparent="true"/>
+
+      <view class="CKnob" control-tag="Root::Nasal" origin="36, 203" size="72, 72" min-value="0" max-value="1" default-value="0" angle-start="135" angle-range="270" circle-drawing="false" corona-drawing="true" corona-from-center="false" corona-dash-dot="false" corona-outline="true" corona-line-cap-butt="false" corona-inset="8" corona-outline-width-add="1.5" skip-handle-drawing="false" corona-color="#6546a3ff" handle-color="#6546a3ff" handle-shadow-color="#aaa6aeff" handle-line-width="7" value-inset="8" zoom-factor="1.7" wheel-inc-value="0.01"/>
+      <view class="CTextLabel" origin="14, 277" size="116, 22" title="Nasalitaet" font="~ NormalFontSmall" font-color="#242329ff" text-alignment="center" transparent="true"/>
+      <view class="CKnob" control-tag="Root::Resonance" origin="158, 203" size="72, 72" min-value="0" max-value="1" default-value="0" angle-start="135" angle-range="270" circle-drawing="false" corona-drawing="true" corona-from-center="false" corona-dash-dot="false" corona-outline="true" corona-line-cap-butt="false" corona-inset="8" corona-outline-width-add="1.5" skip-handle-drawing="false" corona-color="#6546a3ff" handle-color="#6546a3ff" handle-shadow-color="#aaa6aeff" handle-line-width="7" value-inset="8" zoom-factor="1.7" wheel-inc-value="0.01"/>
+      <view class="CTextLabel" origin="136, 277" size="116, 22" title="Resonanzen" font="~ NormalFontSmall" font-color="#242329ff" text-alignment="center" transparent="true"/>
+      <view class="CKnob" control-tag="Root::Tone" origin="280, 203" size="72, 72" min-value="0" max-value="1" default-value="0.5" angle-start="135" angle-range="270" circle-drawing="false" corona-drawing="true" corona-from-center="false" corona-dash-dot="false" corona-outline="true" corona-line-cap-butt="false" corona-inset="8" corona-outline-width-add="1.5" skip-handle-drawing="false" corona-color="#6546a3ff" handle-color="#6546a3ff" handle-shadow-color="#aaa6aeff" handle-line-width="7" value-inset="8" zoom-factor="1.7" wheel-inc-value="0.01"/>
+      <view class="CTextLabel" origin="258, 277" size="116, 22" title="Praesenz" font="~ NormalFontSmall" font-color="#242329ff" text-alignment="center" transparent="true"/>
+
+      <view class="CKnob" control-tag="Root::Bass" origin="384, 203" size="72, 72" min-value="0" max-value="1" default-value="0.5" angle-start="135" angle-range="270" circle-drawing="false" corona-drawing="true" corona-from-center="false" corona-dash-dot="false" corona-outline="true" corona-line-cap-butt="false" corona-inset="8" corona-outline-width-add="1.5" skip-handle-drawing="false" corona-color="#6546a3ff" handle-color="#6546a3ff" handle-shadow-color="#aaa6aeff" handle-line-width="7" value-inset="8" zoom-factor="1.7" wheel-inc-value="0.01"/>
+      <view class="CTextLabel" origin="362, 277" size="116, 22" title="Bassanteil" font="~ NormalFontSmall" font-color="#242329ff" text-alignment="center" transparent="true"/>
+      <view class="CKnob" control-tag="Root::BeatTone" origin="506, 203" size="72, 72" min-value="0" max-value="1" default-value="0.5" angle-start="135" angle-range="270" circle-drawing="false" corona-drawing="true" corona-from-center="false" corona-dash-dot="false" corona-outline="true" corona-line-cap-butt="false" corona-inset="8" corona-outline-width-add="1.5" skip-handle-drawing="false" corona-color="#6546a3ff" handle-color="#6546a3ff" handle-shadow-color="#aaa6aeff" handle-line-width="7" value-inset="8" zoom-factor="1.7" wheel-inc-value="0.01"/>
+      <view class="CTextLabel" origin="484, 277" size="116, 22" title="Beat-Hoehen" font="~ NormalFontSmall" font-color="#242329ff" text-alignment="center" transparent="true"/>
+      <view class="CKnob" control-tag="Root::Saturation" origin="628, 203" size="72, 72" min-value="0" max-value="1" default-value="0" angle-start="135" angle-range="270" circle-drawing="false" corona-drawing="true" corona-from-center="false" corona-dash-dot="false" corona-outline="true" corona-line-cap-butt="false" corona-inset="8" corona-outline-width-add="1.5" skip-handle-drawing="false" corona-color="#6546a3ff" handle-color="#6546a3ff" handle-shadow-color="#aaa6aeff" handle-line-width="7" value-inset="8" zoom-factor="1.7" wheel-inc-value="0.01"/>
+      <view class="CTextLabel" origin="606, 277" size="116, 22" title="Saettigung" font="~ NormalFontSmall" font-color="#242329ff" text-alignment="center" transparent="true"/>
+
+      <view class="CTextLabel" origin="20, 312" size="300, 18" title="EQUALIZER" font="~ NormalFontSmall" font-color="#6546a3ff" text-alignment="left" transparent="true"/>
+      <view class="CTextButton" name="analyze-button" control-tag="Root::Analyze" origin="484, 314" size="220, 30" title="BEAT + VOCAL ANALYSIEREN" kick-style="true" font="~ NormalFontSmall" text-color="#ffffffff" frame-color="#523888ff" frame-width="1" round-radius="8" gradient-start-color="#6546a3ff" gradient-end-color="#6546a3ff" gradient-start-color-highlighted="#523888ff" gradient-end-color-highlighted="#523888ff"/>
+      <view custom-view-name="SonoraEqGraph" origin="20, 348" size="684, 74" transparent="true"/>
+      <view custom-view-name="SonoraEqFader60" origin="56, 430" size="38, 58" min-value="0" max-value="1" default-value="0.5" mode="free click" mouse-enabled="true" transparent="true"/>
+      <view custom-view-name="SonoraEqFader250" origin="190, 430" size="38, 58" min-value="0" max-value="1" default-value="0.5" mode="free click" mouse-enabled="true" transparent="true"/>
+      <view custom-view-name="SonoraEqFader1000" origin="324, 430" size="38, 58" min-value="0" max-value="1" default-value="0.5" mode="free click" mouse-enabled="true" transparent="true"/>
+      <view custom-view-name="SonoraEqFader4000" origin="458, 430" size="38, 58" min-value="0" max-value="1" default-value="0.5" mode="free click" mouse-enabled="true" transparent="true"/>
+      <view custom-view-name="SonoraEqFader12000" origin="592, 430" size="38, 58" min-value="0" max-value="1" default-value="0.5" mode="free click" mouse-enabled="true" transparent="true"/>
+      <view class="CTextLabel" origin="24, 490" size="102, 16" title="60 Hz" font="~ NormalFontSmall" font-color="#76737bff" text-alignment="center" transparent="true"/>
+      <view class="CTextLabel" origin="158, 490" size="102, 16" title="250 Hz" font="~ NormalFontSmall" font-color="#76737bff" text-alignment="center" transparent="true"/>
+      <view class="CTextLabel" origin="292, 490" size="102, 16" title="1 kHz" font="~ NormalFontSmall" font-color="#76737bff" text-alignment="center" transparent="true"/>
+      <view class="CTextLabel" origin="426, 490" size="102, 16" title="4 kHz" font="~ NormalFontSmall" font-color="#76737bff" text-alignment="center" transparent="true"/>
+      <view class="CTextLabel" origin="560, 490" size="102, 16" title="12 kHz" font="~ NormalFontSmall" font-color="#76737bff" text-alignment="center" transparent="true"/>
+      <view class="CTextLabel" origin="20, 508" size="360, 16" title="LOKALE DSP-ANALYSE | KEIN KI-MODELL | 8 SEKUNDEN" font="~ NormalFontSmall" font-color="#6546a3ff" text-alignment="left" transparent="true"/>
+      <view custom-view-name="SonoraAnalysisStatus" origin="20, 528" size="684, 70" transparent="true"/>
+    </view>
+
+    <view class="CViewContainer" name="vocal-status" origin="28, 170" size="724, 522" background-color="#ffffffff" background-color-draw-style="filled" visible="false" transparent="false">
+      <view class="CTextLabel" origin="20, 40" size="680, 30" title="VOCAL-BUS BEREIT" font="~ NormalFontVeryBig" font-color="#6546a3ff" text-alignment="center" transparent="true"/>
+      <view class="CTextLabel" origin="48, 110" size="628, 48" title="Diese Instanz ist ein Routing-Hinweis und bearbeitet den Klang nicht." font="~ NormalFont" font-color="#242329ff" text-alignment="center" transparent="true"/>
+      <view class="CTextLabel" origin="48, 170" size="628, 48" title="Route deine Vocal-Spuren in FL Studio auf diesen Bus und den Bus weiter zum Master." font="~ NormalFont" font-color="#76737bff" text-alignment="center" transparent="true"/>
+      <view class="CTextLabel" origin="48, 238" size="628, 32" title="Die Master-Instanz bearbeitet die Summe aus Vocal und Beat." font="~ NormalFontSmall" font-color="#76737bff" text-alignment="center" transparent="true"/>
+    </view>
+
+    <view class="CViewContainer" name="beat-status" origin="28, 170" size="724, 522" background-color="#ffffffff" background-color-draw-style="filled" visible="false" transparent="false">
+      <view class="CTextLabel" origin="20, 40" size="680, 30" title="BEAT-BUS BEREIT" font="~ NormalFontVeryBig" font-color="#6546a3ff" text-alignment="center" transparent="true"/>
+      <view class="CTextLabel" origin="48, 110" size="628, 48" title="Diese Instanz ist ein Routing-Hinweis und bearbeitet den Klang nicht." font="~ NormalFont" font-color="#242329ff" text-alignment="center" transparent="true"/>
+      <view class="CTextLabel" origin="48, 170" size="628, 48" title="Route deine Beat-Spuren in FL Studio auf diesen Bus und den Bus weiter zum Master." font="~ NormalFont" font-color="#76737bff" text-alignment="center" transparent="true"/>
+      <view class="CTextLabel" origin="48, 238" size="628, 32" title="Die Master-Instanz bearbeitet die Summe aus Vocal und Beat." font="~ NormalFontSmall" font-color="#76737bff" text-alignment="center" transparent="true"/>
+    </view>
+  </template>
+  <control-tags>
+    <control-tag name="Root::Mode" tag="0"/>
+    <control-tag name="Root::Amount" tag="1"/>
+    <control-tag name="Root::Bass" tag="2"/>
+    <control-tag name="Root::Tone" tag="3"/>
+    <control-tag name="Root::Output" tag="4"/>
+    <control-tag name="Root::Bypass" tag="5"/>
+    <control-tag name="Root::Preset" tag="6"/>
+    <control-tag name="Root::Nasal" tag="7"/>
+    <control-tag name="Root::Resonance" tag="8"/>
+    <control-tag name="Root::BeatTone" tag="9"/>
+    <control-tag name="Root::Saturation" tag="10"/>
+    <control-tag name="Root::Eq60" tag="11"/>
+    <control-tag name="Root::Eq250" tag="12"/>
+    <control-tag name="Root::Eq1000" tag="13"/>
+    <control-tag name="Root::Eq4000" tag="14"/>
+    <control-tag name="Root::Eq12000" tag="15"/>
+    <control-tag name="Root::VocalFocus" tag="16"/>
+    <control-tag name="Root::Analyze" tag="17"/>
+  </control-tags>
+</vstgui-ui-description>

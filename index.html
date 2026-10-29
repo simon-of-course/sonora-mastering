@@ -56,21 +56,27 @@
 
         <section class="plugin-card" aria-labelledby="plugin-title">
           <div class="plugin-overview">
-            <span class="section-kicker">FÜR FL STUDIO · WINDOWS</span>
-            <h2 id="plugin-title">SONORA Master VST3</h2>
-            <p>Mastering direkt im Mixer: mit sechs Klang-Presets, EQ-Frequenzkurve, fünf Fadern und optionaler Vocal-Sidechain.</p>
-            <a class="plugin-download" href="https://github.com/simon-of-course/sonora-mastering/releases/latest/download/SONORA_Master.vst3.zip">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v11m0 0 4-4m-4 4-4-4M5 16v4h14v-4"/></svg>
-              <span>VST3 kostenlos herunterladen<small>Windows · ZIP-Datei · Version 0.1.0</small></span>
-            </a>
+            <span class="section-kicker">VST3 · WINDOWS</span>
+            <h2 id="plugin-title">SONORA VST3-Plugins</h2>
+            <p>SONORA Master bietet Mixer-Mastering mit sechs Klang-Presets, EQ und lokaler Analyse. SONORA Shutter setzt rhythmische Vocal-Effekte per Automation.</p>
+            <div class="plugin-downloads">
+              <a class="plugin-download" href="https://github.com/simon-of-course/sonora-mastering/releases/latest/download/SONORA_Master.vst3.zip">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v11m0 0 4-4m-4 4-4-4M5 16v4h14v-4"/></svg>
+                <span>SONORA Master herunterladen<small>Mastering · Windows · VST3 ZIP</small></span>
+              </a>
+              <a class="plugin-download plugin-download-secondary" href="https://github.com/simon-of-course/sonora-mastering/releases/latest/download/SONORA_Shutter.vst3.zip">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v11m0 0 4-4m-4 4-4-4M5 16v4h14v-4"/></svg>
+                <span>SONORA Shutter herunterladen<small>Vocal Shutter · Windows · VST3 ZIP</small></span>
+              </a>
+            </div>
             <a class="plugin-readme-link" href="https://github.com/simon-of-course/sonora-mastering/blob/main/plugin/README.md" target="_blank" rel="noopener noreferrer">Vollständige Readme auf GitHub ansehen ↗</a>
           </div>
           <div class="plugin-readme">
             <div class="plugin-readme-block">
-              <h3>Installation</h3>
+              <h3>Installation (beide VSTs)</h3>
               <ol>
-                <li>ZIP entpacken.</li>
-                <li>Den Ordner <code>SONORA_Master.vst3</code> nach <code>%CommonProgramFiles%\VST3</code> kopieren.</li>
+                <li>Gewünschte ZIP-Datei entpacken.</li>
+                <li>Den enthaltenen <code>.vst3</code>-Ordner nach <code>%CommonProgramFiles%\VST3</code> kopieren.</li>
                 <li>FL Studio neu starten und installierte Plugins suchen.</li>
               </ol>
             </div>
@@ -78,7 +84,15 @@
               <h3>Vocal-Sidechain (optional)</h3>
               <p>Vocal und Beat zum Master routen; zusätzlich einen <strong>Sidechain-only</strong>-Send vom Vocal- zum Beat-Bus legen. SONORA Master kommt im Modus „Master“ auf den Beat-Bus. So senkt der Beat bei Gesang dezent die Präsenzfrequenzen ab; die Stimme selbst bleibt unberührt.</p>
             </div>
-            <p class="plugin-readme-note">Die Sidechain trennt keine Spuren. Ohne Sidechain-Signal hat „Vocal-Fokus“ keine Wirkung. Das Plugin ist ein experimentelles Werkzeug und garantiert kein fertiges Master.</p>
+            <div class="plugin-readme-block">
+              <h3>Analyse &amp; Vorschläge</h3>
+              <p>Wiedergabe starten und <strong>„Beat + Vocal analysieren“</strong> drücken. Nach acht Sekunden misst das VST Pegel und fünf Frequenzbereiche und wendet vorsichtige EQ- und Dynamik-Korrekturen auf den Beat an.</p>
+            </div>
+            <div class="plugin-readme-block">
+              <h3>SONORA Shutter</h3>
+              <p>Auf die Vocal-Spur legen und „Shutter an“ per DAW-Automation nur in den gewünschten Songstellen aktivieren. Tempo-Sync, Notenwert, Tiefe, Mix und Glättung steuern den Effekt.</p>
+            </div>
+            <p class="plugin-readme-note">Die Analyse läuft lokal mit DSP, nicht mit neuronaler KI. Sie trennt keine Spuren, bearbeitet den Vocal-Bus nicht und garantiert kein perfektes Master. Für den finalen Gesamtpegel den kombinierten Mix separat mastern.</p>
           </div>
         </section>
 
@@ -209,10 +223,10 @@
             <section id="panel-master" class="master-tab-panel" role="tabpanel" aria-labelledby="tab-master">
               <div class="intensity-card">
                 <div class="intensity-heading">
-                  <div><span class="section-kicker">MASTERING-STÄRKE</span><strong id="intensity-value">48<span>%</span></strong></div>
-                  <span id="intensity-description" class="intensity-description">Moderat</span>
+                  <div><span class="section-kicker">MASTERING-STÄRKE</span><strong id="intensity-value">30<span>%</span></strong></div>
+                  <span id="intensity-description" class="intensity-description">Natürlich</span>
                 </div>
-                <input id="intensity" class="intensity-slider" type="range" min="0" max="100" value="48" aria-label="Mastering-Stärke">
+                <input id="intensity" class="intensity-slider" type="range" min="0" max="100" value="30" aria-label="Mastering-Stärke">
                 <div class="slider-labels"><span>LEICHT</span><span>STARK</span></div>
               </div>
               <div class="master-control-group" aria-label="Main-Master-Regler">

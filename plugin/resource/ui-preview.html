@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SONORA Master – UI-Vorschau</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 18px;
+      background: #e9e7ed;
+      color: #242329;
+      font: 12px "Segoe UI", Arial, sans-serif;
+    }
+    .plugin {
+      width: 780px;
+      height: 810px;
+      overflow: hidden;
+      padding: 18px 28px;
+      background: #f4f2f7;
+    }
+    .brand { font-size: 23px; font-weight: 650; letter-spacing: -.5px; }
+    .tagline { margin-top: 5px; color: #76737b; font-size: 10px; letter-spacing: 1.15px; }
+    .mode-row { display: flex; align-items: center; gap: 18px; height: 81px; padding-top: 9px; }
+    .field-label, .eyebrow { color: #76737b; font-size: 10px; letter-spacing: .75px; }
+    .mode-field { width: 260px; }
+    .select {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 36px;
+      margin-top: 7px;
+      padding: 0 12px;
+      border: 1px solid #e7e5e1;
+      border-radius: 6px;
+      background: white;
+      font-size: 12px;
+    }
+    .hint { color: #76737b; font-size: 11px; }
+    .panel {
+      width: 724px;
+      height: 617px;
+      padding: 12px;
+      background: #f4f2f7;
+    }
+    .card {
+      position: absolute;
+      border: 1px solid #e8e5ee;
+      border-radius: 10px;
+      background: #fff;
+    }
+    .hero { top: 0; width: 700px; height: 154px; }
+    .tone-card { top: 154px; width: 700px; height: 130px; background: #faf8fd; }
+    .eq-card { top: 300px; width: 700px; height: 293px; }
+    .panel-inner { position: relative; width: 700px; height: 593px; }
+    .hero-content, .tone-content, .eq-content { position: absolute; z-index: 1; }
+    .hero-content { inset: 5px 8px auto; height: 135px; }
+    .tone-content { top: 168px; left: 8px; width: 684px; height: 126px; }
+    .eq-content { top: 300px; left: 8px; width: 684px; }
+    .section-label { color: #6546a3; font-size: 10px; letter-spacing: .85px; }
+    .section-title { margin-top: 3px; font-size: 19px; font-weight: 600; }
+    .hero-controls { display: flex; align-items: center; gap: 18px; margin-top: 12px; }
+    .preset-field { width: 300px; margin-right: 1px; }
+    .preset-field .select { margin-top: 6px; }
+    .knob-field { display: flex; width: 94px; flex-direction: column; align-items: center; }
+    .knob-field .field-label { height: 14px; white-space: nowrap; text-align: center; }
+    .knob {
+      position: relative;
+      display: block;
+      width: 57px;
+      height: 57px;
+      margin-top: 3px;
+      --angle: 0deg;
+      --progress: 37.5;
+      --arc-radius: 20px;
+      --needle-length: calc(var(--arc-radius) + 2px);
+    }
+    .knob svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+    .knob .dial-base { fill: #faf9fb; stroke: #eeeaf4; stroke-width: 2; }
+    .knob .arc-track, .knob .arc-value {
+      fill: none;
+      stroke-linecap: round;
+      stroke-width: 7;
+    }
+    .knob .arc-track { stroke: #e8e4ed; }
+    .knob .arc-value {
+      stroke: #6546a3;
+      stroke-dasharray: var(--progress) 100;
+      filter: drop-shadow(0 1px 1px #6546a333);
+    }
+    .knob i {
+      position: absolute;
+      z-index: 1;
+      top: calc(50% - var(--needle-length));
+      left: calc(50% - 2px);
+      width: 4px;
+      height: var(--needle-length);
+      border-radius: 4px;
+      background: #6546a3;
+      transform: rotate(var(--angle));
+      transform-origin: 50% 100%;
+    }
+    .knob.small { width: 54px; height: 54px; --arc-radius: 19px; }
+    .bypass {
+      align-self: flex-end;
+      margin: 0 0 11px -15px;
+      padding: 5px 8px;
+      border: 1px solid #e7e5e1;
+      border-radius: 5px;
+      background: white;
+      color: #76737b;
+      font-size: 10px;
+    }
+    .control-group { position: absolute; top: 23px; display: flex; width: 342px; justify-content: space-around; }
+    .control-group.left { left: 0; }
+    .control-group.right { right: 0; }
+    .control-item { display: flex; width: 104px; flex-direction: column; align-items: center; }
+    .control-item .caption { margin-top: 5px; font-size: 11px; }
+    .eq-heading { display: flex; align-items: center; justify-content: space-between; }
+    .analyze {
+      height: 30px;
+      padding: 0 15px;
+      border: 1px solid #523888;
+      border-radius: 8px;
+      background: #6546a3;
+      color: white;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: .25px;
+    }
+    .graph {
+      display: block;
+      width: 684px;
+      height: 74px;
+      margin-top: 6px;
+      border: 1px solid #e7e5e1;
+      border-radius: 5px;
+      background: #faf9fb;
+    }
+    .sliders { display: flex; justify-content: space-around; height: 58px; margin: 8px 22px 0; }
+    .slider { position: relative; width: 38px; height: 58px; }
+    .rail { position: absolute; top: 7px; left: 17px; width: 4px; height: 44px; border-radius: 3px; background: #e7e5e1; }
+    .fill { position: absolute; top: 23px; left: 17px; width: 4px; height: 28px; border-radius: 3px; background: #6546a3; }
+    .thumb { position: absolute; top: 23px; left: 11px; width: 16px; height: 16px; border: 2px solid #6546a3; border-radius: 50%; background: white; box-shadow: 0 1px 4px #24232922; }
+    .slider:nth-child(2) .fill { top: 20px; height: 20px; }
+    .slider:nth-child(2) .thumb { top: 14px; }
+    .slider:nth-child(3) .fill { top: 25px; height: 26px; }
+    .slider:nth-child(3) .thumb { top: 19px; }
+    .slider:nth-child(4) .fill { top: 14px; height: 37px; }
+    .slider:nth-child(4) .thumb { top: 8px; }
+    .slider:nth-child(5) .fill { top: 22px; height: 29px; }
+    .slider:nth-child(5) .thumb { top: 16px; }
+    .band-labels { display: flex; justify-content: space-around; margin-top: 2px; color: #76737b; font-size: 10px; }
+    .analysis-title { margin-top: 4px; color: #6546a3; font-size: 9px; letter-spacing: .65px; }
+    .analysis {
+      height: 70px;
+      margin-top: 4px;
+      padding: 5px 8px;
+      border: 1px solid #e7e5e1;
+      border-radius: 5px;
+      background: #faf9fb;
+    }
+    .status { color: #76737b; font-size: 9px; }
+    .meter { height: 3px; margin-top: 4px; border-radius: 3px; background: #e7e5e1; }
+    .meter-grid { display: grid; grid-template-columns: 35px repeat(5, 1fr); align-items: center; margin-top: 4px; text-align: center; }
+    .meter-grid span { color: #76737b; font-size: 8px; }
+    .meter-grid strong { font-size: 9px; font-weight: 500; }
+    .meter-grid .vocal { color: #6546a3; }
+    .preview-note { width: 780px; padding: 8px 18px; color: #6b6870; font-size: 11px; }
+  </style>
+</head>
+<body>
+  <main class="plugin" aria-label="SONORA Master UI-Vorschau">
+    <header>
+      <div class="brand">sonora / master</div>
+      <div class="tagline">NATUERLICH. PRAEZISE. DEIN SOUND.</div>
+    </header>
+    <section class="mode-row">
+      <div class="mode-field">
+        <div class="field-label">BUS-MODUS</div>
+        <div class="select"><span>Master</span><span>⌄</span></div>
+      </div>
+      <div class="hint">Vocal-Sidechain zum Beat-Bus steuert die dynamische Praesenzabsenkung.</div>
+    </section>
+    <section class="panel">
+      <div class="panel-inner">
+        <div class="card hero"></div>
+        <div class="card tone-card"></div>
+        <div class="card eq-card"></div>
+        <div class="hero-content">
+          <div class="eyebrow">KLANGFORMUNG</div>
+          <div class="section-title">Main Master</div>
+          <div class="hero-controls">
+            <div class="preset-field">
+              <div class="field-label">PRESET</div>
+              <div class="select"><span>Clean</span><span>⌄</span></div>
+            </div>
+            <div class="knob-field"><div class="field-label">MASTERING-STAERKE</div><span class="knob" style="--progress:30;--angle:-54deg"><svg viewBox="0 0 100 100" aria-hidden="true"><circle class="dial-base" cx="50" cy="50" r="29"/><path class="arc-track" pathLength="100" d="M25 75 A35 35 0 1 1 75 75"/><path class="arc-value" pathLength="100" d="M25 75 A35 35 0 1 1 75 75"/></svg><i></i></span></div>
+            <div class="knob-field"><div class="field-label">VOCAL-FOKUS</div><span class="knob small" style="--progress:50;--angle:0deg"><svg viewBox="0 0 100 100" aria-hidden="true"><circle class="dial-base" cx="50" cy="50" r="29"/><path class="arc-track" pathLength="100" d="M25 75 A35 35 0 1 1 75 75"/><path class="arc-value" pathLength="100" d="M25 75 A35 35 0 1 1 75 75"/></svg><i></i></span></div>
+            <div class="knob-field"><div class="field-label">AUSGANGSPEGEL</div><span class="knob small" style="--progress:50;--angle:0deg"><svg viewBox="0 0 100 100" aria-hidden="true"><circle class="dial-base" cx="50" cy="50" r="29"/><path class="arc-track" pathLength="100" d="M25 75 A35 35 0 1 1 75 75"/><path class="arc-value" pathLength="100" d="M25 75 A35 35 0 1 1 75 75"/></svg><i></i></span></div>
+            <div class="bypass">Bypass</div>
+          </div>
+        </div>
+        <div class="tone-content">
+          <div class="section-label">VOCAL-FEINSCHLIFF</div>
+          <div class="control-group left">
+            <div class="control-item"><span class="knob" style="--progress:0;--angle:-135deg"><svg viewBox="0 0 100 100" aria-hidden="true"><circle class="dial-base" cx="50" cy="50" r="29"/><path class="arc-track" pathLength="100" d="M25 75 A35 35 0 1 1 75 75"/><path class="arc-value" pathLength="100" d="M25 75 A35 35 0 1 1 75 75"/></svg><i></i></span><div class="caption">Nasalitaet</div></div>
+            <div class="control-item"><span class="knob" style="--progress:0;--angle:-135deg"><svg viewBox="0 0 100 100" aria-hidden="true"><circle class="dial-base" cx="50" cy="50" r="29"/><path class="arc-track" pathLength="100" d="M25 75 A35 35 0 1 1 75 75"/><path class="arc-value" pathLength="100" d="M25 75 A35 35 0 1 1 75 75"/></svg><i></i></span><div class="caption">Resonanzen</div></div>
+            <div class="control-item"><span class="knob" style="--progress:50;--angle:0deg"><svg viewBox="0 0 100 100" aria-hidden="true"><circle class="dial-base" cx="50" cy="50" r="29"/><path class="arc-track" pathLength="100" d="M25 75 A35 35 0 1 1 75 75"/><path class="arc-value" pathLength="100" d="M25 75 A35 35 0 1 1 75 75"/></svg><i></i></span><div class="caption">Praesenz</div></div>
+          </div>
+          <div class="section-label" style="position:absolute;left:368px">BEAT + MASTER</div>
+          <div class="control-group right">
+            <div class="control-item"><span class="knob" style="--progress:50;--angle:0deg"><svg viewBox="0 0 100 100" aria-hidden="true"><circle class="dial-base" cx="50" cy="50" r="29"/><path class="arc-track" pathLength="100" d="M25 75 A35 35 0 1 1 75 75"/><path class="arc-value" pathLength="100" d="M25 75 A35 35 0 1 1 75 75"/></svg><i></i></span><div class="caption">Bassanteil</div></div>
+            <div class="control-item"><span class="knob" style="--progress:50;--angle:0deg"><svg viewBox="0 0 100 100" aria-hidden="true"><circle class="dial-base" cx="50" cy="50" r="29"/><path class="arc-track" pathLength="100" d="M25 75 A35 35 0 1 1 75 75"/><path class="arc-value" pathLength="100" d="M25 75 A35 35 0 1 1 75 75"/></svg><i></i></span><div class="caption">Beat-Hoehen</div></div>
+            <div class="control-item"><span class="knob" style="--progress:0;--angle:-135deg"><svg viewBox="0 0 100 100" aria-hidden="true"><circle class="dial-base" cx="50" cy="50" r="29"/><path class="arc-track" pathLength="100" d="M25 75 A35 35 0 1 1 75 75"/><path class="arc-value" pathLength="100" d="M25 75 A35 35 0 1 1 75 75"/></svg><i></i></span><div class="caption">Saettigung</div></div>
+          </div>
+        </div>
+        <div class="eq-content">
+          <div class="eq-heading">
+            <div class="section-label">EQUALIZER</div>
+            <button class="analyze">BEAT + VOCAL ANALYSIEREN</button>
+          </div>
+          <svg class="graph" viewBox="0 0 684 86" role="img" aria-label="EQ-Kurve">
+            <defs><linearGradient id="wash" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#6546a3" stop-opacity=".14"/><stop offset="1" stop-color="#6546a3" stop-opacity="0"/></linearGradient></defs>
+            <g stroke="#e7e5e1" stroke-width="1">
+              <path d="M0 1H684M0 22H684M0 64H684M0 85H684"/>
+              <path d="M85 0V86M185 0V86M285 0V86M385 0V86M485 0V86M585 0V86"/>
+            </g>
+            <path d="M0 43 C50 43 65 34 95 35 S145 47 185 44 S250 37 285 40 S350 47 385 42 S450 30 485 34 S545 46 585 40 S650 36 684 39 V43 H0Z" fill="url(#wash)"/>
+            <path d="M0 43 C50 43 65 34 95 35 S145 47 185 44 S250 37 285 40 S350 47 385 42 S450 30 485 34 S545 46 585 40 S650 36 684 39" fill="none" stroke="#6546a3" stroke-width="2.5" stroke-linecap="round"/>
+            <g fill="#fff" stroke="#6546a3" stroke-width="2"><circle cx="95" cy="35" r="4"/><circle cx="185" cy="44" r="4"/><circle cx="285" cy="40" r="4"/><circle cx="485" cy="34" r="4"/><circle cx="585" cy="40" r="4"/></g>
+          </svg>
+          <div class="sliders">
+            <div class="slider"><div class="rail"></div><div class="fill"></div><div class="thumb"></div></div>
+            <div class="slider"><div class="rail"></div><div class="fill"></div><div class="thumb"></div></div>
+            <div class="slider"><div class="rail"></div><div class="fill"></div><div class="thumb"></div></div>
+            <div class="slider"><div class="rail"></div><div class="fill"></div><div class="thumb"></div></div>
+            <div class="slider"><div class="rail"></div><div class="fill"></div><div class="thumb"></div></div>
+          </div>
+          <div class="band-labels"><span>60 Hz</span><span>250 Hz</span><span>1 kHz</span><span>4 kHz</span><span>12 kHz</span></div>
+          <div class="analysis-title">LOKALE DSP-ANALYSE | KEIN KI-MODELL | 8 SEKUNDEN</div>
+          <div class="analysis">
+            <div class="status">Analyse bereit | Beat am Eingang, Vocal als Sidechain; Wiedergabe starten und Analyse klicken (8 s).</div>
+            <div class="meter"></div>
+            <div class="meter-grid">
+              <span></span><span>60 Hz</span><span>250 Hz</span><span>1 kHz</span><span>4 kHz</span><span>12 kHz</span>
+              <strong>Beat</strong><strong>--</strong><strong>--</strong><strong>--</strong><strong>--</strong><strong>--</strong>
+              <strong class="vocal">Vocal</strong><strong class="vocal">--</strong><strong class="vocal">--</strong><strong class="vocal">--</strong><strong class="vocal">--</strong><strong class="vocal">--</strong>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+  <div class="preview-note">Statische Browser-Vorschau des Plugin-Layouts – keine laufende VST-Instanz.</div>
+</body>
+</html>

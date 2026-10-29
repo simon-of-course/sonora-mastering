@@ -382,38 +382,35 @@
     const [lowRatio, midRatio, highRatio] = features.bandRatios;
     const eq = [0, 0, 0, 0, 0];
     if (lowRatio > 0.48) {
-      eq[0] = -Math.min(1.5, (lowRatio - 0.48) * 8);
-      eq[1] = -Math.min(0.8, (lowRatio - 0.48) * 4);
-    } else if (lowRatio < 0.2) {
-      eq[0] = Math.min(0.6, (0.2 - lowRatio) * 3);
+      eq[0] = -Math.min(1, (lowRatio - 0.48) * 6);
+      eq[1] = -Math.min(0.5, (lowRatio - 0.48) * 3);
     }
-    if (midRatio > 0.62) eq[2] = -Math.min(1, (midRatio - 0.62) * 5);
-    if (highRatio < 0.12 && lowRatio < 0.52) {
-      eq[4] = Math.min(0.8, (0.12 - highRatio) * 8);
-    } else if (highRatio > 0.35) {
-      eq[4] = -Math.min(1.2, (highRatio - 0.35) * 6);
+    if (midRatio > 0.62) eq[2] = -Math.min(0.5, (midRatio - 0.62) * 3);
+    if (highRatio > 0.35) {
+      eq[4] = -Math.min(0.75, (highRatio - 0.35) * 4);
     }
     if (Array.isArray(features.eqBandRatios) && features.eqBandRatios.length === 5) {
       const [sub, bass, body, presence, air] = features.eqBandRatios;
       if (sub > 0.36) eq[0] = Math.min(eq[0], -0.5);
       if (bass > 0.31) eq[1] = Math.min(eq[1], -0.5);
       if (body > 0.42) eq[2] = Math.min(eq[2], -0.5);
-      if (presence < 0.11 && lowRatio > 0.32 && highRatio < 0.32) eq[3] = 0.5;
-      else if (presence > 0.26) eq[3] = -0.5;
+      if (presence > 0.26) eq[3] = -0.5;
       if (air > 0.24) eq[4] = Math.min(eq[4], -0.5);
     }
     const recommendedEq = eq.map((value) => Math.round(value * 2) / 2);
 
-    const intensity = Math.round(Math.max(30, Math.min(64, 42 + (features.crestDb - 10) * 2)));
+    const intensity = Math.round(Math.max(20, Math.min(42, 28 + (features.crestDb - 10) * 1.2)));
     const changes = [];
     if (recommendedEq[0] < 0 || recommendedEq[1] < 0) changes.push('Bass kontrolliert');
-    else if (recommendedEq[0] > 0) changes.push('Tiefbass behutsam ergänzt');
     if (recommendedEq[2] < 0) changes.push('Mitten sanft entzerrt');
-    if (recommendedEq[3] > 0) changes.push('Präsenz behutsam unterstützt');
-    else if (recommendedEq[3] < 0) changes.push('Präsenz entschärft');
-    if (recommendedEq[4] > 0) changes.push('Höhen behutsam geöffnet');
-    else if (recommendedEq[4] < 0) changes.push('Höhen leicht zurückgenommen');
-    const summary = `${changes.length ? changes.join(' · ') : 'Tonbalance wirkt ausgewogen'} · Dynamik ${intensity < 38 ? 'bereits dicht' : intensity > 56 ? 'mit viel Spielraum' : 'ausgewogen'}`;
+    if (recommendedEq[3] < 0) changes.push('Präsenz entschärft');
+    if (recommendedEq[4] < 0) changes.push('Höhen leicht zurückgenommen');
+    const dynamics = features.crestDb < 8
+      ? 'bereits dicht'
+      : features.crestDb > 14
+        ? 'mit viel Spielraum'
+        : 'ausgewogen';
+    const summary = `${changes.length ? changes.join(' · ') : 'Tonbalance wirkt ausgewogen'} · Dynamik ${dynamics}`;
 
     return { eq: recommendedEq, intensity, summary };
   }

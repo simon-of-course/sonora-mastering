@@ -117,21 +117,30 @@ test('automatic mastering makes bounded corrections based on measured tonal bala
     crestDb: 10
   });
   assert.ok(low.eq[0] < 0);
-  assert.ok(low.eq.every((value) => Math.abs(value) <= 1.5));
+  assert.ok(low.eq.every((value) => value >= -1 && value <= 0));
   assert.ok(low.eq.every((value) => Number.isInteger(value * 2)));
-  assert.ok(low.intensity >= 30 && low.intensity <= 64);
+  assert.ok(low.intensity >= 20 && low.intensity <= 42);
   assert.deepEqual(balanced.eq, [0, 0, 0, 0, 0]);
   assert.match(balanced.summary, /ausgewogen/);
 });
 
-test('automatic EQ supports restrained presence and reduces harsh upper-frequency energy', () => {
+test('natural automatic EQ only makes restrained cuts, never guesses at presence boosts', () => {
   const recommendation = engine.recommendAdaptiveMastering({
     bandRatios: [0.4, 0.3, 0.3],
     eqBandRatios: [0.1, 0.1, 0.4, 0.05, 0.35],
     crestDb: 10
   });
-  assert.equal(recommendation.eq[3], 0.5);
+  assert.equal(recommendation.eq[3], 0);
   assert.equal(recommendation.eq[4], -0.5);
-  assert.match(recommendation.summary, /Präsenz behutsam unterstützt/);
+  assert.ok(recommendation.eq.every((value) => value <= 0));
+  assert.ok(recommendation.intensity < 42);
   assert.match(recommendation.summary, /Höhen leicht zurückgenommen/);
+  assert.doesNotMatch(recommendation.summary, /unterstützt|geöffnet/);
+
+  const sparse = engine.recommendAdaptiveMastering({
+    bandRatios: [0.1, 0.85, 0.05],
+    eqBandRatios: [0.05, 0.05, 0.75, 0.05, 0.1],
+    crestDb: 10
+  });
+  assert.ok(sparse.eq.every((value) => value <= 0));
 });

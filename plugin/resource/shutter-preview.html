@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SONORA Shutter – UI-Vorschau</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 18px; background: #e9e7ed; color: #242329; font: 12px "Segoe UI", Arial, sans-serif; }
+    .plugin { width: 700px; height: 500px; padding: 18px 20px; background: #f4f2f7; }
+    .brand { margin-left: 8px; font-size: 23px; font-weight: 650; letter-spacing: -.5px; }
+    .tagline { margin: 5px 0 0 8px; color: #76737b; font-size: 10px; letter-spacing: 1.15px; }
+    .card { position: relative; margin-top: 16px; border: 1px solid #e8e5ee; border-radius: 10px; background: #fff; }
+    .trigger { display: flex; height: 112px; align-items: center; justify-content: space-between; padding: 16px 20px; }
+    .eyebrow { color: #6546a3; font-size: 10px; letter-spacing: .85px; }
+    h1 { margin: 7px 0 5px; font-size: 19px; font-weight: 600; }
+    .hint { margin: 0; color: #76737b; font-size: 11px; }
+    .toggle-area { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+    .toggle { display: flex; width: 136px; height: 34px; align-items: center; justify-content: center; gap: 8px; border: 1px solid #523888; border-radius: 7px; background: #6546a3; color: white; font-size: 10px; font-weight: 650; letter-spacing: .4px; }
+    .toggle-dot { width: 9px; height: 9px; border-radius: 50%; background: #fff; box-shadow: 0 0 0 3px #ffffff38; }
+    .subtle { color: #76737b; font-size: 10px; }
+    .rate-card { height: 172px; padding: 16px 20px; }
+    .controls { display: grid; grid-template-columns: 160px 180px 1fr; gap: 20px; margin-top: 16px; }
+    .field { display: flex; flex-direction: column; align-items: center; }
+    .label { margin-bottom: 7px; color: #76737b; font-size: 10px; letter-spacing: .7px; }
+    .check { display: flex; width: 100%; height: 34px; align-items: center; justify-content: center; gap: 8px; border: 1px solid #e7e5e1; border-radius: 6px; background: #fff; font-size: 11px; }
+    .check-mark { width: 14px; height: 14px; border: 1px solid #6546a3; border-radius: 3px; background: #6546a3; color: #fff; font-size: 11px; line-height: 12px; }
+    .select { display: flex; width: 100%; height: 34px; align-items: center; justify-content: space-between; padding: 0 11px; border: 1px solid #e7e5e1; border-radius: 6px; background: #fff; }
+    .knob { position: relative; width: 64px; height: 64px; }
+    .knob svg { width: 64px; height: 64px; }
+    .track { fill: none; stroke: #e8e4ed; stroke-width: 6; stroke-linecap: round; }
+    .value { fill: none; stroke: #6546a3; stroke-width: 6; stroke-linecap: round; }
+    .needle { position: absolute; top: 7px; left: 30px; width: 4px; height: 25px; border-radius: 4px; background: #6546a3; transform-origin: 50% 100%; transform: rotate(-86.54deg); }
+    .free { margin-top: 4px; color: #76737b; font-size: 10px; }
+    .sound-card { display: flex; height: 88px; align-items: center; padding: 12px 20px; }
+    .sound-title { width: 110px; align-self: flex-start; padding-top: 4px; }
+    .sound-controls { display: flex; flex: 1; justify-content: space-around; }
+    .sound-control { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+    .sound-control .knob { width: 58px; height: 58px; }
+    .sound-control .knob svg { width: 58px; height: 58px; }
+    .sound-control .needle { top: 6px; left: 27px; height: 23px; transform-origin: 50% 100%; }
+    .sound-control span:last-child { color: #76737b; font-size: 10px; }
+    .note { width: 700px; padding: 8px 18px; color: #6b6870; font-size: 11px; }
+  </style>
+</head>
+<body>
+  <main class="plugin" aria-label="SONORA Shutter Oberfläche">
+    <header>
+      <div class="brand">sonora / shutter</div>
+      <div class="tagline">RHYTHMUS. BEWEGUNG. DEINE VOCALS.</div>
+    </header>
+    <section class="card trigger">
+      <div>
+        <div class="eyebrow">SHUTTER-BEREICH</div>
+        <h1>Per Automation im Song setzen</h1>
+        <p class="hint">Zeichne in FL Studio die Aktivierung nur dort ein, wo der Effekt soll.</p>
+      </div>
+      <div class="toggle-area">
+        <div class="toggle"><i class="toggle-dot"></i> SHUTTER AN</div>
+        <div class="subtle">Automatisierbar in FL Studio</div>
+      </div>
+    </section>
+    <section class="card rate-card">
+      <div class="eyebrow">TAKTRATE</div>
+      <div class="controls">
+        <div class="field">
+          <div class="label">TEMPO-SYNC</div>
+          <div class="check"><i class="check-mark">✓</i> Sync aktiv</div>
+        </div>
+        <div class="field">
+          <div class="label">NOTENWERT</div>
+          <div class="select"><span>1/16</span><span>⌄</span></div>
+        </div>
+        <div class="field">
+          <div class="label">FREIE RATE</div>
+          <div class="knob">
+            <svg viewBox="0 0 64 64" aria-hidden="true">
+              <circle cx="32" cy="32" r="24" fill="#faf9fb" stroke="#eeeaf4" stroke-width="1.5"/>
+              <path class="track" d="M14.322 49.678 A25 25 0 1 1 49.678 49.678"/>
+              <path class="value" stroke-dasharray="17.95 100" pathLength="100" d="M14.322 49.678 A25 25 0 1 1 49.678 49.678"/>
+            </svg>
+            <i class="needle" style="transform:rotate(-86.54deg)"></i>
+          </div>
+          <div class="free">0.5 – 20 Hz (bei Sync aus)</div>
+        </div>
+      </div>
+    </section>
+    <section class="card sound-card">
+      <div class="sound-title eyebrow">SHUTTER-KLANG</div>
+      <div class="sound-controls">
+        <div class="sound-control">
+          <div class="knob"><svg viewBox="0 0 58 58" aria-hidden="true"><circle cx="29" cy="29" r="22" fill="#faf9fb" stroke="#eeeaf4" stroke-width="1.5"/><path class="track" d="M12.7365 45.2635 A23 23 0 1 1 45.2635 45.2635"/><path class="value" stroke-dasharray="85 100" pathLength="100" d="M12.7365 45.2635 A23 23 0 1 1 45.2635 45.2635"/></svg><i class="needle" style="transform:rotate(94.5deg)"></i></div>
+          <span>TIEFE</span>
+        </div>
+        <div class="sound-control">
+          <div class="knob"><svg viewBox="0 0 58 58" aria-hidden="true"><circle cx="29" cy="29" r="22" fill="#faf9fb" stroke="#eeeaf4" stroke-width="1.5"/><path class="track" d="M12.7365 45.2635 A23 23 0 1 1 45.2635 45.2635"/><path class="value" stroke-dasharray="100 100" pathLength="100" d="M12.7365 45.2635 A23 23 0 1 1 45.2635 45.2635"/></svg><i class="needle" style="transform:rotate(135deg)"></i></div>
+          <span>MIX</span>
+        </div>
+        <div class="sound-control">
+          <div class="knob"><svg viewBox="0 0 58 58" aria-hidden="true"><circle cx="29" cy="29" r="22" fill="#faf9fb" stroke="#eeeaf4" stroke-width="1.5"/><path class="track" d="M12.7365 45.2635 A23 23 0 1 1 45.2635 45.2635"/><path class="value" stroke-dasharray="16.67 100" pathLength="100" d="M12.7365 45.2635 A23 23 0 1 1 45.2635 45.2635"/></svg><i class="needle" style="transform:rotate(-90deg)"></i></div>
+          <span>GLAETTUNG</span>
+        </div>
+      </div>
+    </section>
+  </main>
+  <div class="note">Shutter auf einer Vocal-Spur einsetzen. Die Aktivierung in der FL-Studio-Automationsspur zeichnen.</div>
+</body>
+</html>

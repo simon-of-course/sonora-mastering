@@ -2,7 +2,7 @@
   'use strict';
 
   const PRESETS = {
-    universal: { eq: [0, 0, 0, 0, 0], thresholds: [-25, -25, -24], ratios: [1.65, 1.7, 1.5], crossovers: [120, 2800], gain: 0.4 }
+    natural: { eq: [0, 0, 0, 0, 0], thresholds: [-17, -17, -17], ratios: [1.3, 1.3, 1.25], crossovers: [120, 2800], gain: 0.2 }
   };
   const FREQUENCIES = [60, 250, 1000, 4000, 12000];
   const EQ_Q = [Math.SQRT1_2, 0.65, 0.65, 0.65, Math.SQRT1_2];
@@ -29,13 +29,13 @@
   let decodedBuffer;
   let waveformPeaks;
   let currentObjectUrl;
-  let eqValues = [...PRESETS.universal.eq];
-  let automaticEqValues = [...PRESETS.universal.eq];
+  let eqValues = [...PRESETS.natural.eq];
+  let automaticEqValues = [...PRESETS.natural.eq];
   const masterControls = { bass: 0, beatTone: 0, presence: 0, nasal: 0, resonances: 0, saturation: 0 };
   let detectedResonances = [];
   let trimStartValue = 0;
   let trimEndValue = 1000;
-  let intensity = 48;
+  let intensity = 30;
   let bypass = false;
   let isSeeking = false;
   let animationFrame = 0;
@@ -206,7 +206,7 @@
     const gains = masteringEngine.getMixGains(amount, bypass);
     audioNodes.dryGain.gain.setTargetAtTime(gains.dryGain, now, 0.025);
     audioNodes.wetGain.gain.setTargetAtTime(gains.wetGain, now, 0.025);
-    configureMasterChain(audioNodes.chain, PRESETS.universal, getEffectiveEq(), amount, now, getMasterSettings());
+    configureMasterChain(audioNodes.chain, PRESETS.natural, getEffectiveEq(), amount, now, getMasterSettings());
   }
 
   function getMasterSettings() {
@@ -240,11 +240,13 @@
     $('#intensity-value').innerHTML = `${intensity}<span>%</span>`;
     $('#intensity-description').textContent = intensity < 25
       ? 'Leicht'
-      : intensity < 70
-        ? 'Moderat'
-        : intensity < 90
-          ? 'Deutlich'
-          : 'Stark';
+      : intensity < 45
+        ? 'Natürlich'
+        : intensity < 70
+          ? 'Moderat'
+          : intensity < 90
+            ? 'Deutlich'
+            : 'Stark';
     intensitySlider.style.setProperty('--fill', `${intensity}%`);
   }
 
@@ -524,7 +526,7 @@
           for (const name of Object.keys(masterControls)) masterControls[name] = 0;
           intensity = recommendation.intensity;
           intensitySlider.value = String(intensity);
-          $('#mastering-state').textContent = 'Automatisch auf diesen Track angepasst';
+          $('#mastering-state').textContent = 'Natürlich auf diesen Track abgestimmt';
           $('#mastering-summary').textContent = recommendation.summary;
           $('#resonance-summary').textContent = detectedResonances.length
             ? `${detectedResonances.length} schmale Resonanzbereiche im Mix gefunden.`
@@ -755,12 +757,12 @@
     });
     chain.compressors.forEach((compressor, index) => {
       const threshold = index === 2
-        ? -18 - 7 * amount
-        : -18 + (preset.thresholds[index] + 18) * amount;
-      const ratio = 1 + (preset.ratios[index] - 1) * amount * (index === 2 ? 1.5 : 1);
+        ? -14 - 3 * amount
+        : -14 + (preset.thresholds[index] + 14) * amount;
+      const ratio = 1 + (preset.ratios[index] - 1) * amount;
       setAudioParam(compressor.threshold, threshold, time);
       setAudioParam(compressor.ratio, ratio, time);
-      compressor.knee.value = index === 2 ? 18 : 12;
+      compressor.knee.value = 8;
       compressor.attack.value = index === 0 ? 0.03 : index === 1 ? 0.012 : 0.004;
       compressor.release.value = index === 0 ? 0.2 : index === 1 ? 0.12 : 0.075;
     });
@@ -834,7 +836,7 @@
       const trimStartSeconds = trimRange.startFrame / decodedBuffer.sampleRate;
       const trimDurationSeconds = (trimRange.endFrame - trimRange.startFrame) / decodedBuffer.sampleRate;
       const source = makeOfflineGraph(context, decodedBuffer, {
-        preset: PRESETS.universal,
+        preset: PRESETS.natural,
         eq: getEffectiveEq(),
         controls: getMasterSettings(),
         intensity: intensity / 100,
