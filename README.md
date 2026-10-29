@@ -4,7 +4,7 @@ A browser-based audio mastering tool. Tracks stay on your device: the app uses t
 
 ## Run
 
-Open `index.html` in a current desktop browser. For the most reliable audio decoding, serve this folder with any static web server and open its local URL.
+Open `index.html` for the SONORA Audio landing page. Open `mastering.html` to use the browser mastering tool, or `plugins.html` to see the VST3 plugin previews and downloads. For the most reliable audio decoding, serve this folder with any static web server and open its local URL.
 
 ## Included
 
