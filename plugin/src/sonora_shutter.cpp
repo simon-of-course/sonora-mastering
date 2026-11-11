@@ -1,191 +1,312 @@
+// SONORA Shutter — VST3 glue (SingleComponentEffect + VST3Editor) around
+// sonora::dsp::shutter::ShutterEngine (plugin/src/dsp/shutter_engine.h).
+//
+// Threading: parameter values live in atomics written by setParamNormalized (UI/host thread) and
+// read once per block by process(). Host automation arrives as IParamValueQueue points, which are
+// merged, sorted by sample offset and handed to the engine as ParamEvents, so automation is
+// sample-accurate without splitting blocks. The last point of every queue is written back to the
+// atomics so the next block starts from the automated value.
+//
+// State v2: int32 version (2), int32 parameter count, then one double (normalized) per parameter.
+// The count makes the format extensible: Bypass (ID 13) was appended later, older v2 states
+// (count 13) load with Bypass off.
+// State v1 (v0.1): int32 version (1), 7 doubles; Notenwert is migrated from 9 to 12 list entries.
+
 #include "public.sdk/source/main/pluginfactory.h"
 #include "public.sdk/source/vst/vstsinglecomponenteffect.h"
-#include "public.sdk/source/vst/vstguieditor.h"
-#include "pluginterfaces/base/ustring.h"
+#include "public.sdk/source/vst/vstparameters.h"
+#include "pluginterfaces/base/ibstream.h"
 #include "pluginterfaces/vst/ivstparameterchanges.h"
-#include "pluginterfaces/vst/ivstprocesscontext.h"
 #include "pluginterfaces/vst/ivstplugview.h"
+#include "pluginterfaces/vst/ivstprocesscontext.h"
+#include "pluginterfaces/vst/vstspeaker.h"
 #include "base/source/fstreamer.h"
-#include "vstgui/lib/cdrawcontext.h"
-#include "vstgui/lib/controls/icontrollistener.h"
 #include "vstgui/plugin-bindings/vst3editor.h"
-#include "vstgui/uidescription/uiattributes.h"
+
+#include "dsp/shutter_engine.h"
+#include "ui/param_format.h"
+#include "ui/sonora_ui.h"
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <cstring>
+#include <vector>
+
+#if defined(__SSE__) || defined(_M_X64) || defined(_M_AMD64) || (defined(_M_IX86_FP) && _M_IX86_FP >= 1)
+#include <xmmintrin.h>
+#define SONORA_HAS_MXCSR 1
+#endif
+
+#ifndef SONORA_VERSION_STRING
+#define SONORA_VERSION_STRING "0.2.0"
+#endif
 
 namespace {
 
-enum ParameterId : Steinberg::Vst::ParamID {
-    kEnableId,
-    kSyncId,
-    kDivisionId,
-    kRateId,
-    kDepthId,
-    kMixId,
-    kSmoothingId,
-    kParameterCount
+namespace sh = sonora::dsp::shutter;
+using Steinberg::int32;
+using Steinberg::tresult;
+using Steinberg::Vst::ParamID;
+using Steinberg::Vst::ParamValue;
+
+constexpr int kNumParams = sh::kNumParams;
+constexpr int kNumParamsV1 = 7;
+constexpr int32 kStateVersion = 2;
+constexpr int kEventCapacity = 8192;
+
+// Flush denormals to zero for the duration of process() (x86 only).
+class DenormalGuard {
+public:
+    DenormalGuard() {
+#ifdef SONORA_HAS_MXCSR
+        saved_ = _mm_getcsr();
+        _mm_setcsr(saved_ | 0x8040u); // FTZ | DAZ
+#endif
+    }
+    ~DenormalGuard() {
+#ifdef SONORA_HAS_MXCSR
+        _mm_setcsr(saved_);
+#endif
+    }
+    DenormalGuard(const DenormalGuard&) = delete;
+    DenormalGuard& operator=(const DenormalGuard&) = delete;
+
+private:
+#ifdef SONORA_HAS_MXCSR
+    unsigned int saved_ = 0;
+#endif
 };
 
-constexpr double kPi = 3.14159265358979323846;
-constexpr double kDefaultTempo = 120.0;
-constexpr std::array<double, 9> kQuarterNotesPerCycle{{
-    4.0, 2.0, 1.0, 0.5, 0.25, 0.125, 1.0 / 3.0, 1.0 / 6.0, 1.0 / 12.0
-}};
-
-double clampNormalized(double value) {
-    return std::isfinite(value) ? std::clamp(value, 0.0, 1.0) : 0.0;
+double sanitizeNormalized(double v, double fallback) {
+    return std::isfinite(v) ? std::clamp(v, 0.0, 1.0) : fallback;
 }
 
-class ShutterCard final : public VSTGUI::CView {
+void toUtf16(const char* utf8, Steinberg::Vst::String128 out) {
+    sonora::ui::FormattedParameter::utf8ToUtf16(utf8, out, 128);
+}
+
+// On/off parameter with German value texts ("An"/"Aus").
+class ToggleParameter : public Steinberg::Vst::Parameter {
 public:
-    explicit ShutterCard(const VSTGUI::CRect& size) : CView(size) {
-        setMouseEnabled(false);
+    ToggleParameter(const char* title, ParamID id, bool defaultOn, int32 extraFlags = 0) {
+        toUtf16(title, info.title);
+        info.id = id;
+        info.stepCount = 1;
+        info.defaultNormalizedValue = defaultOn ? 1.0 : 0.0;
+        info.flags = Steinberg::Vst::ParameterInfo::kCanAutomate | extraFlags;
+        info.unitId = Steinberg::Vst::kRootUnitId;
+        setNormalized(info.defaultNormalizedValue);
     }
-
-    void draw(VSTGUI::CDrawContext* context) override {
-        context->setDrawMode(VSTGUI::kAntiAliasing);
-        context->setFillColor(VSTGUI::CColor{255, 255, 255, 255});
-        context->setFrameColor(VSTGUI::CColor{232, 229, 238, 255});
-        auto* path = context->createRoundRectGraphicsPath(getViewSize(), 10.0);
-        if (path) {
-            context->drawGraphicsPath(path, VSTGUI::CDrawContext::kPathFilled);
-            context->drawGraphicsPath(path, VSTGUI::CDrawContext::kPathStroked);
-            path->forget();
-        }
-        context->setDrawMode(VSTGUI::kAliasing);
-        setDirty(false);
+    void toString(ParamValue normalized, Steinberg::Vst::String128 string) const SMTG_OVERRIDE {
+        toUtf16(normalized >= 0.5 ? "An" : "Aus", string);
     }
-
-    CLASS_METHODS(ShutterCard, CView)
+    bool fromString(const Steinberg::Vst::TChar* string, ParamValue& normalized) const SMTG_OVERRIDE {
+        if (!string || !string[0]) return false;
+        const auto c0 = string[0] | 0x20, c1 = string[1] | 0x20;
+        if (c0 == 'a' && c1 == 'n') normalized = 1.0;          // "An"
+        else if (c0 == 'a' && c1 == 'u') normalized = 0.0;     // "Aus"
+        else if (c0 == 'o' && c1 == 'n') normalized = 1.0;     // "On"
+        else if (c0 == 'o' && c1 == 'f') normalized = 0.0;     // "Off"
+        else if (c0 == '1') normalized = 1.0;
+        else if (c0 == '0') normalized = 0.0;
+        else return false;
+        return true;
+    }
+    OBJ_METHODS(ToggleParameter, Parameter)
 };
+
+template <std::size_t N>
+Steinberg::Vst::StringListParameter* makeList(int id, const std::array<const char*, N>& names) {
+    Steinberg::Vst::String128 title{};
+    toUtf16(sh::kParamInfo[static_cast<std::size_t>(id)].name, title);
+    auto* p = new Steinberg::Vst::StringListParameter(title, static_cast<ParamID>(id));
+    for (const char* name : names) {
+        Steinberg::Vst::String128 s{};
+        toUtf16(name, s);
+        p->appendString(s);
+    }
+    const double def = sh::defaultNormalized(id);
+    p->getInfo().defaultNormalizedValue = def;
+    p->setNormalized(def);
+    return p;
+}
+
+sonora::ui::ParamFormat formatFor(int id) {
+    using sonora::ui::ParamFormat;
+    switch (id) {
+    case sh::kRate: return ParamFormat::hz(1);
+    case sh::kSmoothing: return ParamFormat::ms(1);
+    default: return ParamFormat::percent(0); // Tiefe, Mix, Pulsbreite, Swing, Versatz
+    }
+}
 
 } // namespace
 
 class SonoraShutter final : public Steinberg::Vst::SingleComponentEffect,
-                            public VSTGUI::VST3EditorDelegate,
-                            public VSTGUI::IControlListener {
+                            public VSTGUI::VST3EditorDelegate {
 public:
     static Steinberg::FUnknown* createInstance(void*) {
         return static_cast<Steinberg::Vst::IAudioProcessor*>(new SonoraShutter());
     }
 
     SonoraShutter() {
-        parameterValues_[kEnableId].store(0.0);
-        parameterValues_[kSyncId].store(1.0);
-        parameterValues_[kDivisionId].store(4.0 / 8.0);
-        parameterValues_[kRateId].store(0.35);
-        parameterValues_[kDepthId].store(0.85);
-        parameterValues_[kMixId].store(1.0);
-        parameterValues_[kSmoothingId].store(0.2);
+        for (int id = 0; id < kNumParams; ++id) values_[static_cast<std::size_t>(id)].store(sh::defaultNormalized(id));
+        events_.resize(kEventCapacity);
+        sorted_.resize(kEventCapacity);
+        order_.resize(kEventCapacity);
+        uiContext_.meters = &meters_;
+        uiContext_.getParam = [this](std::uint32_t id) { return getParamNormalized(id); };
+        uiContext_.gateAt = [this](double pos, int channel) {
+            std::array<double, kNumParams> n{};
+            for (int id = 0; id < kNumParams; ++id) n[static_cast<std::size_t>(id)] = getParamNormalized(static_cast<ParamID>(id));
+            return sh::patternGain(n.data(), pos, channel, lastTempo_.load(std::memory_order_relaxed),
+                                   busChannels_.load(std::memory_order_relaxed) >= 2);
+        };
     }
 
-    Steinberg::tresult PLUGIN_API initialize(Steinberg::FUnknown* context) override {
+    // --- IComponent / IAudioProcessor ------------------------------------------------------------
+
+    tresult PLUGIN_API initialize(Steinberg::FUnknown* context) override {
         const auto result = SingleComponentEffect::initialize(context);
-        if (result != Steinberg::kResultOk) {
-            return result;
-        }
+        if (result != Steinberg::kResultOk) return result;
         addAudioInput(STR16("Vocal In"), Steinberg::Vst::SpeakerArr::kStereo);
         addAudioOutput(STR16("Vocal Out"), Steinberg::Vst::SpeakerArr::kStereo);
 
-        parameters.addParameter(
-            STR16("Shutter aktiv"), nullptr, Steinberg::Vst::kStepCountToggle,
-            0.0, Steinberg::Vst::ParameterInfo::kCanAutomate, kEnableId);
-        parameters.addParameter(
-            STR16("Tempo Sync"), nullptr, Steinberg::Vst::kStepCountToggle,
-            1.0, Steinberg::Vst::ParameterInfo::kCanAutomate, kSyncId);
-
-        auto* division = new Steinberg::Vst::StringListParameter(
-            STR16("Notenwert"), kDivisionId);
-        division->appendString(STR16("1/1"));
-        division->appendString(STR16("1/2"));
-        division->appendString(STR16("1/4"));
-        division->appendString(STR16("1/8"));
-        division->appendString(STR16("1/16"));
-        division->appendString(STR16("1/32"));
-        division->appendString(STR16("1/8 T"));
-        division->appendString(STR16("1/16 T"));
-        division->appendString(STR16("1/32 T"));
-        division->getInfo().defaultNormalizedValue = 0.5;
-        division->setNormalized(0.5);
-        parameters.addParameter(division);
-
-        addRangeParameter("Rate", "Hz", kRateId, 0.5, 20.0, 4.0);
-        addRangeParameter("Tiefe", "%", kDepthId, 0.0, 100.0, 85.0);
-        addRangeParameter("Mix", "%", kMixId, 0.0, 100.0, 100.0);
-        addRangeParameter("Glattung", "ms", kSmoothingId, 0.0, 12.0, 2.0);
+        for (int id = 0; id < kNumParams; ++id) {
+            const auto& info = sh::kParamInfo[static_cast<std::size_t>(id)];
+            switch (id) {
+            case sh::kEnable:
+            case sh::kSync:
+                parameters.addParameter(new ToggleParameter(info.name, static_cast<ParamID>(id), info.defaultPlain >= 0.5));
+                break;
+            case sh::kBypass:
+                parameters.addParameter(new ToggleParameter(info.name, static_cast<ParamID>(id), false,
+                                                            Steinberg::Vst::ParameterInfo::kIsBypass));
+                break;
+            case sh::kDivision: parameters.addParameter(makeList(id, sh::kDivisionNames)); break;
+            case sh::kShape: parameters.addParameter(makeList(id, sh::kShapeNames)); break;
+            case sh::kStereo: parameters.addParameter(makeList(id, sh::kStereoNames)); break;
+            case sh::kGateTone: parameters.addParameter(makeList(id, sh::kGateToneNames)); break;
+            default: {
+                Steinberg::Vst::String128 title{};
+                toUtf16(info.name, title);
+                parameters.addParameter(new sonora::ui::FormattedParameter(
+                    title, static_cast<ParamID>(id), info.minPlain, info.maxPlain, info.defaultPlain, formatFor(id)));
+                break;
+            }
+            }
+        }
         return Steinberg::kResultOk;
     }
 
-    Steinberg::tresult PLUGIN_API canProcessSampleSize(Steinberg::int32 size) override {
-        return size == Steinberg::Vst::kSample32 || size == Steinberg::Vst::kSample64
-            ? Steinberg::kResultTrue
-            : Steinberg::kResultFalse;
+    tresult PLUGIN_API canProcessSampleSize(int32 size) override {
+        return size == Steinberg::Vst::kSample32 || size == Steinberg::Vst::kSample64 ? Steinberg::kResultTrue
+                                                                                   : Steinberg::kResultFalse;
     }
 
     Steinberg::uint32 PLUGIN_API getProcessContextRequirements() override {
-        return Steinberg::Vst::IProcessContextRequirements::kNeedTempo
-            | Steinberg::Vst::IProcessContextRequirements::kNeedProjectTimeMusic
-            | Steinberg::Vst::IProcessContextRequirements::kNeedTransportState;
+        using R = Steinberg::Vst::IProcessContextRequirements;
+        return R::kNeedTempo | R::kNeedProjectTimeMusic | R::kNeedTransportState;
     }
 
-    Steinberg::tresult PLUGIN_API setActive(Steinberg::TBool state) override {
-        if (!state) {
-            gainEnvelope_ = 1.0;
-            freePhase_ = 0.0;
-        }
-        return SingleComponentEffect::setActive(state);
+    Steinberg::uint32 PLUGIN_API getLatencySamples() override { return 0; }
+    Steinberg::uint32 PLUGIN_API getTailSamples() override { return 0; }
+
+    tresult PLUGIN_API setBusArrangements(Steinberg::Vst::SpeakerArrangement* inputs, int32 numIns,
+                                          Steinberg::Vst::SpeakerArrangement* outputs, int32 numOuts) override {
+        using namespace Steinberg::Vst;
+        if (numIns != 1 || numOuts != 1 || !inputs || !outputs || inputs[0] != outputs[0]) return Steinberg::kResultFalse;
+        if (inputs[0] != SpeakerArr::kMono && inputs[0] != SpeakerArr::kStereo) return Steinberg::kResultFalse;
+        return SingleComponentEffect::setBusArrangements(inputs, numIns, outputs, numOuts);
     }
 
-    Steinberg::tresult PLUGIN_API setupProcessing(
-        Steinberg::Vst::ProcessSetup& setup) override {
-        sampleRate_ = setup.sampleRate > 0.0 ? setup.sampleRate : 44100.0;
+    tresult PLUGIN_API setupProcessing(Steinberg::Vst::ProcessSetup& setup) override {
+        sampleRate_ = setup.sampleRate > 0.0 && std::isfinite(setup.sampleRate) ? setup.sampleRate : 44100.0;
+        maxBlock_ = std::max<int32>(1, setup.maxSamplesPerBlock);
+        syncEngineFromAtomics();
+        engine_.prepare(sampleRate_, maxBlock_);
         return SingleComponentEffect::setupProcessing(setup);
     }
 
-    Steinberg::tresult PLUGIN_API setParamNormalized(
-        Steinberg::Vst::ParamID tag,
-        Steinberg::Vst::ParamValue value) override {
-        const auto result = SingleComponentEffect::setParamNormalized(tag, value);
-        if (result == Steinberg::kResultOk && tag < kParameterCount) {
-            parameterValues_[tag].store(clampNormalized(value), std::memory_order_relaxed);
+    tresult PLUGIN_API setActive(Steinberg::TBool state) override {
+        if (state) {
+            syncEngineFromAtomics();
+            engine_.reset();
         }
+        meters_.publish(1.0f, 1.0f, 0.0f, false, false);
+        return SingleComponentEffect::setActive(state);
+    }
+
+    tresult PLUGIN_API process(Steinberg::Vst::ProcessData& data) override {
+        DenormalGuard denormals;
+        syncEngineFromAtomics();
+        const int numEvents = collectEvents(data);
+
+        const bool haveAudio = data.numSamples > 0 && data.numInputs > 0 && data.numOutputs > 0 && data.inputs
+                               && data.outputs;
+        if (!haveAudio) {
+            for (int i = 0; i < numEvents; ++i) engine_.setParameter(events_[static_cast<std::size_t>(i)].id, events_[static_cast<std::size_t>(i)].normalized);
+            return Steinberg::kResultOk;
+        }
+
+        sh::TransportInfo transport;
+        if (const auto* ctx = data.processContext) {
+            using PC = Steinberg::Vst::ProcessContext;
+            transport.hasTempo = (ctx->state & PC::kTempoValid) != 0;
+            transport.tempo = ctx->tempo;
+            transport.hasPosition = (ctx->state & PC::kProjectTimeMusicValid) != 0;
+            transport.ppqPosition = ctx->projectTimeMusic;
+            transport.isPlaying = (ctx->state & PC::kPlaying) != 0;
+        } else {
+            transport.hasTempo = false;
+            transport.hasPosition = false;
+            transport.isPlaying = true;
+        }
+
+        auto& inBus = data.inputs[0];
+        auto& outBus = data.outputs[0];
+        const int channels = std::clamp<int>(std::min(inBus.numChannels, outBus.numChannels), 0, 2);
+        const int n = data.numSamples;
+        if (data.symbolicSampleSize == Steinberg::Vst::kSample64) {
+            processBuffers(inBus.channelBuffers64, outBus.channelBuffers64, inBus.numChannels, outBus.numChannels,
+                           channels, n, transport, numEvents);
+        } else {
+            processBuffers(inBus.channelBuffers32, outBus.channelBuffers32, inBus.numChannels, outBus.numChannels,
+                           channels, n, transport, numEvents);
+        }
+        outBus.silenceFlags = 0;
+
+        if (transport.hasTempo && std::isfinite(transport.tempo) && transport.tempo > 0.0)
+            lastTempo_.store(transport.tempo, std::memory_order_relaxed);
+        if (channels > 0) busChannels_.store(channels, std::memory_order_relaxed);
+        const auto& m = engine_.meters();
+        meters_.publish(m.gainL, channels >= 2 ? m.gainR : m.gainL, m.scopePhase, m.active > 0.0f,
+                        transport.isPlaying);
+        return Steinberg::kResultOk;
+    }
+
+    // --- IEditController -------------------------------------------------------------------------
+
+    tresult PLUGIN_API setParamNormalized(ParamID tag, ParamValue value) override {
+        const auto result = SingleComponentEffect::setParamNormalized(tag, value);
+        if (result == Steinberg::kResultOk && tag < static_cast<ParamID>(kNumParams))
+            values_[tag].store(sanitizeNormalized(value, sh::defaultNormalized(static_cast<int>(tag))),
+                               std::memory_order_relaxed);
         return result;
     }
 
-    Steinberg::tresult PLUGIN_API setState(Steinberg::IBStream* state) override {
-        Steinberg::IBStreamer streamer(state, kLittleEndian);
-        Steinberg::int32 version = 0;
-        if (!streamer.readInt32(version) || version != 1) {
-            return Steinberg::kResultFalse;
-        }
-        for (Steinberg::Vst::ParamID id = 0; id < kParameterCount; ++id) {
-            double value = 0.0;
-            if (!streamer.readDouble(value)) {
-                return Steinberg::kResultFalse;
-            }
-            setParamNormalized(id, value);
-        }
-        return Steinberg::kResultOk;
-    }
+    tresult PLUGIN_API setState(Steinberg::IBStream* state) override { return readState(state); }
+    tresult PLUGIN_API setComponentState(Steinberg::IBStream* state) override { return readState(state); }
 
-    Steinberg::tresult PLUGIN_API getState(Steinberg::IBStream* state) override {
+    tresult PLUGIN_API getState(Steinberg::IBStream* state) override {
+        if (!state) return Steinberg::kInvalidArgument;
         Steinberg::IBStreamer streamer(state, kLittleEndian);
-        if (!streamer.writeInt32(1)) {
-            return Steinberg::kResultFalse;
-        }
-        for (const auto& value : parameterValues_) {
-            if (!streamer.writeDouble(value.load(std::memory_order_relaxed))) {
-                return Steinberg::kResultFalse;
-            }
-        }
+        if (!streamer.writeInt32(kStateVersion) || !streamer.writeInt32(kNumParams)) return Steinberg::kResultFalse;
+        for (const auto& v : values_)
+            if (!streamer.writeDouble(v.load(std::memory_order_relaxed))) return Steinberg::kResultFalse;
         return Steinberg::kResultOk;
-    }
-
-    Steinberg::tresult PLUGIN_API setComponentState(Steinberg::IBStream* state) override {
-        return setState(state);
     }
 
     Steinberg::IPlugView* PLUGIN_API createView(const char* name) override {
@@ -197,250 +318,143 @@ public:
         return nullptr;
     }
 
-    VSTGUI::CView* createCustomView(
-        VSTGUI::UTF8StringPtr name,
-        const VSTGUI::UIAttributes& attributes,
-        const VSTGUI::IUIDescription*,
-        VSTGUI::VST3Editor*) override {
-        if (std::strcmp(name, "SonoraShutterCard") != 0) {
-            return nullptr;
-        }
-        VSTGUI::CPoint size;
-        if (!attributes.getPointAttribute("size", size)) {
-            return nullptr;
-        }
-        return new ShutterCard({0.0, 0.0, size.x, size.y});
-    }
+    // --- VST3EditorDelegate ----------------------------------------------------------------------
 
-    VSTGUI::CView* verifyView(
-        VSTGUI::CView* view,
-        const VSTGUI::UIAttributes& attributes,
-        const VSTGUI::IUIDescription* description,
-        VSTGUI::VST3Editor* editor) override {
-        if (auto* control = dynamic_cast<VSTGUI::CControl*>(view);
-            control && control->getTag() >= 0
-            && control->getTag() < static_cast<Steinberg::Vst::ParamID>(kParameterCount)) {
-            control->registerControlListener(this);
-            controls_[static_cast<std::size_t>(control->getTag())] = control;
-        }
-        editor_ = editor;
-        return VSTGUI::VST3EditorDelegate::verifyView(
-            view, attributes, description, editor);
-    }
-
-    void willClose(VSTGUI::VST3Editor* editor) override {
-        if (editor_ == editor) {
-            for (auto*& control : controls_) {
-                if (control) {
-                    control->unregisterControlListener(this);
-                    control = nullptr;
-                }
-            }
-            editor_ = nullptr;
-        }
-    }
-
-    void valueChanged(VSTGUI::CControl* control) override {
-        if (!control || !editor_) {
-            return;
-        }
-        const auto tag = static_cast<Steinberg::Vst::ParamID>(control->getTag());
-        if (tag >= kParameterCount) {
-            return;
-        }
-        beginEdit(tag);
-        performEdit(tag, control->getValueNormalized());
-        endEdit(tag);
-    }
-
-    Steinberg::tresult PLUGIN_API process(Steinberg::Vst::ProcessData& data) override {
-        if (data.numInputs <= 0 || data.numOutputs <= 0 || data.numSamples <= 0) {
-            return Steinberg::kResultOk;
-        }
-
-        std::array<double, kParameterCount> values{};
-        std::array<ParameterTimeline, kParameterCount> timelines{};
-        for (Steinberg::Vst::ParamID id = 0; id < kParameterCount; ++id) {
-            values[id] = parameterValues_[id].load(std::memory_order_relaxed);
-        }
-        if (data.inputParameterChanges) {
-            const auto count = data.inputParameterChanges->getParameterCount();
-            for (Steinberg::int32 index = 0; index < count; ++index) {
-                auto* queue = data.inputParameterChanges->getParameterData(index);
-                if (!queue) {
-                    continue;
-                }
-                const auto id = queue->getParameterId();
-                if (id >= kParameterCount || queue->getPointCount() <= 0) {
-                    continue;
-                }
-                auto& timeline = timelines[id];
-                timeline.queue = queue;
-                timeline.nextPoint = 0;
-                readNextPoint(timeline);
-            }
-        }
-
-        const auto channels = std::min(data.inputs[0].numChannels, data.outputs[0].numChannels);
-        const auto* processContext = data.processContext;
-        const bool hasTempo = processContext
-            && (processContext->state & Steinberg::Vst::ProcessContext::kTempoValid)
-            && std::isfinite(processContext->tempo)
-            && processContext->tempo > 0.0;
-        const double tempo = hasTempo ? processContext->tempo : kDefaultTempo;
-        const bool hasMusicPosition = processContext
-            && (processContext->state
-                & Steinberg::Vst::ProcessContext::kProjectTimeMusicValid)
-            && std::isfinite(processContext->projectTimeMusic);
-        const double startQuarterNotes = hasMusicPosition
-            ? processContext->projectTimeMusic
-            : 0.0;
-        const bool transportPlaying = !processContext
-            || (processContext->state & Steinberg::Vst::ProcessContext::kPlaying);
-        const double samplesPerQuarter = sampleRate_ > 0.0
-            ? sampleRate_ * 60.0 / tempo
-            : 0.0;
-        const auto makeSmoothingCoefficient = [this](double normalized) {
-            const double seconds = normalized * 0.012;
-            return seconds > 0.0 && sampleRate_ > 0.0
-                ? std::exp(-1.0 / (seconds * sampleRate_))
-                : 0.0;
-        };
-        double freeRateHz = 0.5 + values[kRateId] * 19.5;
-        double smoothingCoefficient = makeSmoothingCoefficient(values[kSmoothingId]);
-
-        for (Steinberg::int32 frame = 0; frame < data.numSamples; ++frame) {
-            for (Steinberg::Vst::ParamID id = 0; id < kParameterCount; ++id) {
-                auto& timeline = timelines[id];
-                while (timeline.hasPoint && timeline.sampleOffset <= frame) {
-                    values[id] = timeline.value;
-                    if (id == kRateId) {
-                        freeRateHz = 0.5 + values[kRateId] * 19.5;
-                    } else if (id == kSmoothingId) {
-                        smoothingCoefficient =
-                            makeSmoothingCoefficient(values[kSmoothingId]);
-                    }
-                    readNextPoint(timeline);
-                }
-            }
-
-            const auto divisionIndex = static_cast<std::size_t>(
-                std::clamp(std::lround(values[kDivisionId] * 8.0), 0L, 8L));
-            const double cycleQuarterNotes = kQuarterNotesPerCycle[divisionIndex];
-            double phase = freePhase_;
-            if (values[kSyncId] >= 0.5 && hasMusicPosition) {
-                const double quarterPosition = startQuarterNotes
-                    + static_cast<double>(frame) / samplesPerQuarter;
-                phase = positiveFraction(quarterPosition / cycleQuarterNotes);
-            } else if (values[kSyncId] >= 0.5) {
-                phase = freePhase_;
-            }
-
-            const bool active = transportPlaying && values[kEnableId] >= 0.5;
-            const double phaseRate = values[kSyncId] >= 0.5
-                ? (1.0 / cycleQuarterNotes) * tempo / (60.0 * sampleRate_)
-                : freeRateHz / sampleRate_;
-            if (!hasMusicPosition || values[kSyncId] < 0.5) {
-                if (transportPlaying) {
-                    freePhase_ = positiveFraction(freePhase_ + phaseRate);
-                }
-            } else {
-                freePhase_ = phase;
-            }
-
-            const double depth = values[kDepthId];
-            const double dryGate = phase < 0.5 ? 1.0 : 1.0 - depth;
-            const double targetGain = active ? dryGate : 1.0;
-            gainEnvelope_ = targetGain + (gainEnvelope_ - targetGain)
-                * smoothingCoefficient;
-            const double mix = values[kMixId];
-            const double wetGain = 1.0 + (gainEnvelope_ - 1.0) * mix;
-
-            if (data.symbolicSampleSize == Steinberg::Vst::kSample32) {
-                for (Steinberg::int32 channel = 0; channel < channels; ++channel) {
-                    const float input = data.inputs[0].channelBuffers32[channel][frame];
-                    data.outputs[0].channelBuffers32[channel][frame] =
-                        static_cast<float>(input * wetGain);
-                }
-            } else if (data.symbolicSampleSize == Steinberg::Vst::kSample64) {
-                for (Steinberg::int32 channel = 0; channel < channels; ++channel) {
-                    const double input = data.inputs[0].channelBuffers64[channel][frame];
-                    data.outputs[0].channelBuffers64[channel][frame] = input * wetGain;
-                }
-            }
-        }
-
-        for (Steinberg::Vst::ParamID id = 0; id < kParameterCount; ++id) {
-            parameterValues_[id].store(values[id], std::memory_order_relaxed);
-        }
-        return Steinberg::kResultOk;
+    VSTGUI::CView* createCustomView(VSTGUI::UTF8StringPtr name, const VSTGUI::UIAttributes& attributes,
+                                    const VSTGUI::IUIDescription* description, VSTGUI::VST3Editor* editor) override {
+        return sonora::ui::createShutterView(name, attributes, description, editor, uiContext_);
     }
 
 private:
-    struct ParameterTimeline {
-        Steinberg::Vst::IParamValueQueue* queue = nullptr;
-        Steinberg::int32 nextPoint = 0;
-        Steinberg::int32 sampleOffset = 0;
-        double value = 0.0;
-        bool hasPoint = false;
-    };
-
-    static double positiveFraction(double value) {
-        const double fraction = value - std::floor(value);
-        return fraction < 0.0 ? fraction + 1.0 : fraction;
-    }
-
-    static void readNextPoint(ParameterTimeline& timeline) {
-        timeline.hasPoint = false;
-        if (!timeline.queue || timeline.nextPoint >= timeline.queue->getPointCount()) {
-            return;
+    void syncEngineFromAtomics() {
+        for (int id = 0; id < kNumParams; ++id) {
+            const double v = values_[static_cast<std::size_t>(id)].load(std::memory_order_relaxed);
+            if (v != engine_.getParameter(id)) engine_.setParameter(id, v);
         }
-        Steinberg::Vst::ParamValue value = 0.0;
-        Steinberg::int32 sampleOffset = 0;
-        if (timeline.queue->getPoint(timeline.nextPoint, sampleOffset, value)
-            == Steinberg::kResultTrue) {
-            timeline.sampleOffset = sampleOffset;
-            timeline.value = clampNormalized(value);
-            timeline.hasPoint = true;
+    }
+
+    // Merges all queue points into events_ (sorted by offset, stable per parameter) and writes the
+    // last value of every queue back to the atomics. Returns the number of events.
+    int collectEvents(Steinberg::Vst::ProcessData& data) {
+        auto* changes = data.inputParameterChanges;
+        if (!changes) return 0;
+        const int32 queues = changes->getParameterCount();
+        if (queues <= 0) return 0;
+        const int32 lastOffset = std::max<int32>(0, data.numSamples - 1);
+        const int budget = std::max(1, kEventCapacity / static_cast<int>(queues));
+        int count = 0;
+        for (int32 q = 0; q < queues; ++q) {
+            auto* queue = changes->getParameterData(q);
+            if (!queue) continue;
+            const ParamID id = queue->getParameterId();
+            const int32 points = queue->getPointCount();
+            if (id >= static_cast<ParamID>(kNumParams) || points <= 0) continue;
+            // Keep every point if possible; otherwise thin out evenly but always keep the last one.
+            const int32 take = std::min<int32>(points, budget);
+            double last = -1.0;
+            for (int32 k = 0; k < take; ++k) {
+                const int32 index = take == points ? k : static_cast<int32>((static_cast<long long>(k + 1) * points) / take) - 1;
+                int32 offset = 0;
+                ParamValue value = 0.0;
+                if (queue->getPoint(index, offset, value) != Steinberg::kResultTrue || !std::isfinite(value)) continue;
+                value = std::clamp(value, 0.0, 1.0);
+                if (count < kEventCapacity) {
+                    events_[static_cast<std::size_t>(count)] = {std::clamp(offset, 0, lastOffset), static_cast<int>(id), value};
+                    order_[static_cast<std::size_t>(count)] = count;
+                    ++count;
+                }
+                last = value;
+            }
+            if (last >= 0.0) values_[id].store(last, std::memory_order_relaxed);
         }
-        ++timeline.nextPoint;
+        sortEvents(count);
+        return count;
     }
 
-    void addRangeParameter(const char* title, const char* units,
-                           Steinberg::Vst::ParamID id,
-                           double minimum, double maximum, double defaultValue) {
-        Steinberg::Vst::String128 parameterTitle{};
-        Steinberg::Vst::String128 parameterUnits{};
-        Steinberg::UString(
-            parameterTitle,
-            sizeof(parameterTitle) / sizeof(Steinberg::Vst::TChar)).fromAscii(title);
-        Steinberg::UString(
-            parameterUnits,
-            sizeof(parameterUnits) / sizeof(Steinberg::Vst::TChar)).fromAscii(units);
-        parameters.addParameter(new Steinberg::Vst::RangeParameter(
-            parameterTitle, id, parameterUnits, minimum, maximum, defaultValue));
-        parameterValues_[id].store((defaultValue - minimum) / (maximum - minimum));
+    void sortEvents(int count) {
+        if (count < 2) return;
+        auto* ev = events_.data();
+        // Insertion order (order_) breaks ties so points of one queue stay in sequence.
+        std::sort(order_.begin(), order_.begin() + count, [ev](int a, int b) {
+            const auto oa = ev[a].sampleOffset, ob = ev[b].sampleOffset;
+            return oa != ob ? oa < ob : a < b;
+        });
+        for (int i = 0; i < count; ++i) sorted_[static_cast<std::size_t>(i)] = ev[order_[static_cast<std::size_t>(i)]];
+        std::copy(sorted_.begin(), sorted_.begin() + count, events_.begin());
     }
 
-    std::array<std::atomic<double>, kParameterCount> parameterValues_{};
+    template <typename Sample>
+    void processBuffers(Sample** in, Sample** out, int32 numIn, int32 numOut, int channels, int numSamples,
+                        const sh::TransportInfo& transport, int numEvents) {
+        if (!out) return;
+        if (channels > 0 && in) {
+            bool ok = true;
+            for (int ch = 0; ch < channels; ++ch) ok = ok && in[ch] && out[ch];
+            if (ok) {
+                engine_.process<Sample>(in, out, channels, numSamples, transport, events_.data(), numEvents);
+            } else {
+                channels = 0;
+            }
+        }
+        if (channels == 0)
+            for (int i = 0; i < numEvents; ++i) engine_.setParameter(events_[static_cast<std::size_t>(i)].id, events_[static_cast<std::size_t>(i)].normalized);
+        (void)numIn;
+        for (int32 ch = channels; ch < numOut; ++ch)
+            if (out[ch]) std::fill(out[ch], out[ch] + numSamples, Sample(0));
+    }
+
+    tresult readState(Steinberg::IBStream* state) {
+        if (!state) return Steinberg::kInvalidArgument;
+        Steinberg::IBStreamer streamer(state, kLittleEndian);
+        int32 version = 0;
+        if (!streamer.readInt32(version) || version < 1) return Steinberg::kResultFalse;
+        std::array<double, kNumParams> loaded{};
+        for (int id = 0; id < kNumParams; ++id) loaded[static_cast<std::size_t>(id)] = sh::defaultNormalized(id);
+        if (version == 1) {
+            for (int id = 0; id < kNumParamsV1; ++id) {
+                double v = 0.0;
+                if (!streamer.readDouble(v)) break; // truncated: keep defaults for the rest
+                if (std::isfinite(v)) loaded[static_cast<std::size_t>(id)] = sh::migrateParamV1ToV2(id, v);
+            }
+        } else {
+            int32 count = 0;
+            if (streamer.readInt32(count)) {
+                for (int32 i = 0; i < count; ++i) {
+                    double v = 0.0;
+                    if (!streamer.readDouble(v)) break;
+                    if (i < kNumParams && std::isfinite(v)) loaded[static_cast<std::size_t>(i)] = std::clamp(v, 0.0, 1.0);
+                }
+            }
+        }
+        for (int id = 0; id < kNumParams; ++id)
+            setParamNormalized(static_cast<ParamID>(id), loaded[static_cast<std::size_t>(id)]);
+        return Steinberg::kResultOk;
+    }
+
+    std::array<std::atomic<double>, kNumParams> values_{};
+    sh::ShutterEngine engine_;
+    std::vector<sh::ParamEvent> events_;
+    std::vector<sh::ParamEvent> sorted_;
+    std::vector<int> order_;
     double sampleRate_ = 44100.0;
-    double freePhase_ = 0.0;
-    double gainEnvelope_ = 1.0;
-    VSTGUI::VST3Editor* editor_ = nullptr;
-    std::array<VSTGUI::CControl*, kParameterCount> controls_{};
+    int32 maxBlock_ = 1024;
+
+    sonora::ui::ShutterMeterBridge meters_;
+    sonora::ui::ShutterUiContext uiContext_;
+    std::atomic<double> lastTempo_{120.0};
+    std::atomic<int> busChannels_{2};
 };
 
 BEGIN_FACTORY_DEF("SONORA Audio", "https://github.com/simon-of-course/sonora-mastering", "")
 
-DEF_CLASS2(
-    INLINE_UID(0x9C41C85E, 0xD91F4D72, 0xA6B83F27, 0x68120A55),
-    Steinberg::PClassInfo::kManyInstances,
-    kVstAudioEffectClass,
-    "SONORA Shutter",
-    0,
-    "Fx|Effect",
-    "0.1.0",
-    kVstVersionString,
-    SonoraShutter::createInstance)
+DEF_CLASS2(INLINE_UID(0x9C41C85E, 0xD91F4D72, 0xA6B83F27, 0x68120A55),
+           Steinberg::PClassInfo::kManyInstances,
+           kVstAudioEffectClass,
+           "SONORA Shutter",
+           0,
+           "Fx|Effect",
+           SONORA_VERSION_STRING,
+           kVstVersionString,
+           SonoraShutter::createInstance)
 
 END_FACTORY

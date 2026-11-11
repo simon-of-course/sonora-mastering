@@ -50,7 +50,8 @@ enum ParamId : int {
     kStereo = 10,    // Stereo Mono/Ping-Pong
     kGateTone = 11,  // Gate-Klang Stumm/Telefon/Dumpf
     kOffset = 12,    // Versatz 0–100 %
-    kNumParams = 13
+    kBypass = 13,    // Host bypass (VST3 kIsBypass), fades to bit-exact dry like kEnable
+    kNumParams = 14
 };
 
 enum Shape : int { kShapeHard = 0, kShapeSoft = 1, kShapePump = 2 };
@@ -97,6 +98,7 @@ constexpr std::array<ParamInfo, kNumParams> kParamInfo{{
     {"Stereo", "", 0.0, 1.0, 0.0, 1},
     {"Gate-Klang", "", 0.0, 2.0, 0.0, 2},
     {"Versatz", "%", 0.0, 100.0, 0.0, 0},
+    {"Bypass", "", 0.0, 1.0, 0.0, 1},
 }};
 
 constexpr double clampNormalized(double n) {
@@ -165,6 +167,10 @@ struct ShutterMeters {
     float pairPhase = 0.0f;   // position inside the current step pair, 0 … 1
     int stepParity = 0;       // 0 = even step, 1 = odd (swung / R in Ping-Pong)
     float active = 0.0f;      // enable/transport fade 0 … 1
+    // Playhead inside the UI's 8-unit scope window, 0 … 1: (quarter notes mod 8) / 8 when Sync is
+    // on (host position, or the tempo-driven free run without position), (steps mod 8) / 8 when
+    // Sync is off.
+    float scopePhase = 0.0f;
 };
 
 // Pattern value of one step (0 = closed, 1 = open). `edge` is the edge length in step units.
@@ -209,12 +215,44 @@ inline StepPosition locateStep(double position, double swing) {
     return {1, std::clamp((pair - 1.0 - delay) / len, 0.0, 1.0), len};
 }
 
+// Static effective gain (1 = open, 1 - depth·mix = fully closed) of the gate pattern for the
+// UI scope (ShutterUiContext::gateAt). `normalized` holds all kNumParams values; `pos` is in
+// quarter notes (Sync on) or steps (Sync off) from the start of the scope window; `stereoBus`
+// enables Ping-Pong (mono buses fall back to the mono pattern like the engine does).
+inline double patternGain(const double* normalized, double pos, int channel, double tempo,
+                          bool stereoBus) {
+    const auto n = [normalized](int id) { return clampNormalized(normalized[id]); };
+    const bool sync = n(kSync) >= 0.5;
+    const int division = std::clamp(listIndex(kDivision, n(kDivision)), 0, kNumDivisions - 1);
+    const double stepQuarters = kDivisionQuarters[static_cast<std::size_t>(division)];
+    const double bpm = std::isfinite(tempo) && tempo > 0.0 ? std::clamp(tempo, 1.0, 999.0) : 120.0;
+    const double stepsPerSecond = sync ? (bpm / 60.0) / stepQuarters : toPlain(kRate, n(kRate));
+    const double steps = sync ? pos / stepQuarters : pos;
+    const int shape = std::clamp(listIndex(kShape, n(kShape)), 0, 2);
+    const double duty = toPlain(kDuty, n(kDuty)) * 0.01;
+    const StepPosition step = locateStep(steps - toPlain(kOffset, n(kOffset)) * 0.01,
+                                         toPlain(kSwing, n(kSwing)) * 0.01);
+    double gate;
+    if (stereoBus && listIndex(kStereo, n(kStereo)) == kStereoPingPong && step.parity != channel) {
+        gate = shape == kShapePump ? 1.0 : 0.0;
+    } else {
+        const double stepSeconds = step.length / std::max(stepsPerSecond, 1e-6);
+        const double edge = gateEdge(shape, duty, toPlain(kSmoothing, n(kSmoothing)), stepSeconds);
+        gate = gateShape(step.u, duty, edge, shape);
+    }
+    const double amount = toPlain(kDepth, n(kDepth)) * 0.01 * toPlain(kMix, n(kMix)) * 0.01;
+    return 1.0 - amount * (1.0 - gate);
+}
+
 class ShutterEngine {
 public:
     static constexpr int kMaxChannels = 2;
-    static constexpr double kFadeSeconds = 0.008;
+    static constexpr double kFadeSeconds = 0.01;
     static constexpr double kSlewSeconds = 0.00025;
     static constexpr double kTelephoneDrive = 2.0;
+    // Free-run wrap period in steps: even (keeps the step parity) and long enough that
+    // steps · quarterNotesPerStep is a multiple of 8 for every division (continuous scope phase).
+    static constexpr double kFreeWrapSteps = 1536.0;
 
     ShutterEngine() {
         for (int id = 0; id < kNumParams; ++id) normalized_[static_cast<std::size_t>(id)] = defaultNormalized(id);
@@ -318,12 +356,13 @@ public:
             double base;
             if (useSync) {
                 base = (transport.ppqPosition + static_cast<double>(n) * quartersPerSample) / stepQuarters;
-                freePosition_ = base - 2.0 * std::floor(base * 0.5);
+                freePosition_ = base - kFreeWrapSteps * std::floor(base / kFreeWrapSteps);
             } else {
                 base = freePosition_;
                 if (playing) {
                     freePosition_ += stepsPerSecond / sampleRate_;
-                    if (freePosition_ >= 2.0) freePosition_ -= 2.0 * std::floor(freePosition_ * 0.5);
+                    if (freePosition_ >= kFreeWrapSteps)
+                        freePosition_ -= kFreeWrapSteps * std::floor(freePosition_ / kFreeWrapSteps);
                 }
             }
 
@@ -334,7 +373,8 @@ public:
             const double idle = shape_ == kShapePump ? 1.0 : 0.0;
             const bool pingPong = stereoMode_ == kStereoPingPong && channels == 2;
 
-            const double activeTarget = enabled_ && playing ? 1.0 : 0.0;
+            // Enable, transport and bypass share one linear fade (kFadeSeconds) to bit-exact dry.
+            const double activeTarget = enabled_ && playing && !bypassed_ ? 1.0 : 0.0;
             active_ = activeTarget > active_ ? std::min(activeTarget, active_ + fadeStep_)
                                              : std::max(activeTarget, active_ - fadeStep_);
 
@@ -362,6 +402,8 @@ public:
                 const double pair = (base - offset) - 2.0 * std::floor((base - offset) * 0.5);
                 meters_.pairPhase = static_cast<float>(pair * 0.5);
                 meters_.stepParity = step.parity;
+                const double scopeUnits = sync_ ? base * stepQuarters : base;
+                meters_.scopePhase = static_cast<float>((scopeUnits - 8.0 * std::floor(scopeUnits / 8.0)) / 8.0);
             }
         }
         while (events && nextEvent < numEvents) {
@@ -385,6 +427,7 @@ private:
     void updateTargets() {
         const auto n = [this](int id) { return normalized_[static_cast<std::size_t>(id)]; };
         enabled_ = n(kEnable) >= 0.5;
+        bypassed_ = n(kBypass) >= 0.5;
         sync_ = n(kSync) >= 0.5;
         division_ = std::clamp(listIndex(kDivision, n(kDivision)), 0, kNumDivisions - 1);
         rateHz_ = toPlain(kRate, n(kRate));
@@ -400,7 +443,7 @@ private:
     }
 
     std::array<double, kNumParams> normalized_{};
-    bool enabled_ = false, sync_ = true;
+    bool enabled_ = false, bypassed_ = false, sync_ = true;
     int division_ = 3, shape_ = 0, stereoMode_ = 0, tone_ = 0;
     double rateHz_ = 4.0, depth_ = 0.85, mix_ = 1.0, smoothingMs_ = 2.0, duty_ = 0.5, swing_ = 0.0,
            offset_ = 0.0;

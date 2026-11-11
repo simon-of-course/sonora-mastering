@@ -16,7 +16,8 @@
 //   applies to the wet sound only (scaled by engage). With smoothed depth == 0 and an idle
 //   reverb the output is a bit-exact copy of the input.
 // Depth smoothing is a one-pole whose time constant is chosen so that 90 % of a depth change
-// is reached after Abtauchzeit (rising) or Auftauchzeit (falling).
+// is reached after Abtauchzeit (rising) or Auftauchzeit (falling). On the way back to 0 the last
+// 1 % (inaudible: cutoff above 20 kHz) is finished within ~0.1 s so the output becomes bit-exact dry.
 // Parameter changes are applied sample-accurately via the optional ParamEvent list passed to
 // process(); setParameter() between blocks equals an event at offset 0.
 
@@ -40,7 +41,8 @@ enum ParamId : int {
     kBody = 6,        // Körper 0–6 dB
     kMix = 7,         // Mix 0–100 %
     kOutput = 8,      // Ausgang -12…+6 dB
-    kNumParams = 9
+    kBypass = 9,      // Host bypass (VST3 kIsBypass, toggle: >= 0.5 = bypassed), 10 ms fade to dry
+    kNumParams = 10
 };
 
 struct ParamInfo {
@@ -62,6 +64,7 @@ constexpr std::array<ParamInfo, kNumParams> kParamInfo{{
     {"Körper", "dB", 0.0, 6.0, 2.5, false},
     {"Mix", "%", 0.0, 100.0, 100.0, false},
     {"Ausgang", "dB", -12.0, 6.0, 0.0, false},
+    {"Bypass", "", 0.0, 1.0, 0.0, false},
 }};
 
 constexpr double kMinCutoffHz = 350.0;
@@ -155,6 +158,7 @@ public:
             lineGain_[i] = std::pow(10.0, -3.0 * len / (kReverbRt60 * sampleRate_));
         }
         idleLimit_ = static_cast<int>(0.05 * sampleRate_);
+        bypassStep_ = 1.0 / (kBypassFadeSeconds * sampleRate_);
         updateTimeCoefficients();
         reset();
     }
@@ -183,6 +187,7 @@ public:
         reverbHpZ_ = 0.0;
         reverbIdle_ = true;
         idleCount_ = 0;
+        bypassFade_ = bypassed_ ? 1.0 : 0.0;
         meters_ = {};
         meters_.cutoffHz = static_cast<float>(topCutoff_);
     }
@@ -224,9 +229,14 @@ public:
             }
 
             // Depth envelope: dive (rising) / return (falling), 90 % reached after the set time.
-            const double coef = depthTarget_ > depth_ ? diveCoef_ : returnCoef_;
+            // Below kFinalDepth on the way back to 0 the wet blend is inaudible (cutoff > 20 kHz,
+            // engage < 0.26 of a near-identical signal), so finish quickly to reach bit-exact dry.
+            const double coef = depthTarget_ > depth_
+                                    ? diveCoef_
+                                    : (depthTarget_ <= 0.0 && depth_ < kFinalDepth ? std::min(returnCoef_, finalCoef_)
+                                                                                    : returnCoef_);
             depth_ = depthTarget_ + (depth_ - depthTarget_) * coef;
-            if (depthTarget_ <= 0.0 && depth_ < 1e-5) depth_ = 0.0;
+            if (depthTarget_ <= 0.0 && depth_ < 1e-6) depth_ = 0.0;
             if (std::abs(depth_ - depthTarget_) < 1e-12) depth_ = depthTarget_;
             const double s = depth_;
             const double e0 = std::min(1.0, s / kEngageDepth);
@@ -238,6 +248,10 @@ public:
             const double bodyDb = bodySmooth_.next(bodyDb_);
             const double mix = mixSmooth_.next(mix_);
             const double outDb = outSmooth_.next(outputDb_);
+            // Bypass crossfade (1 = dry). The engine keeps running underneath, so un-bypassing
+            // resumes the current state; the reverb tail is simply faded out on bypass.
+            bypassFade_ = bypassed_ ? std::min(1.0, bypassFade_ + bypassStep_) : std::max(0.0, bypassFade_ - bypassStep_);
+            const double wetAmount = mix * (1.0 - bypassFade_);
 
             // Wobble LFOs (L/R slightly detuned).
             const double lfoRate = 0.4 + 0.8 * wobble;
@@ -311,13 +325,13 @@ public:
 
             for (int ch = 0; ch < channels; ++ch) {
                 const double x = static_cast<double>(in[ch][n]);
-                if (engage <= 0.0 && reverbIdle_) {
+                if ((engage <= 0.0 && reverbIdle_) || bypassFade_ >= 1.0) {
                     out[ch][n] = in[ch][n];
                     continue;
                 }
                 const double c = chain[static_cast<std::size_t>(ch)];
                 const double wetSignal = engage * (c * outGain - x) + kReverbLevel * wet[static_cast<std::size_t>(ch)] * outGain;
-                out[ch][n] = static_cast<T>(x + mix * wetSignal);
+                out[ch][n] = static_cast<T>(x + wetAmount * wetSignal);
             }
             if (n == numSamples - 1) meters_.lfo = static_cast<float>(lfo[0]);
             meters_.engage = static_cast<float>(engage);
@@ -334,6 +348,9 @@ public:
 private:
     static constexpr std::size_t kLines = 8;
     static constexpr double kReverbRt60 = 1.2;
+    static constexpr double kFinalDepth = 0.01;   // fast final approach to depth 0 below this
+    static constexpr double kFinalSeconds = 0.04; // 90 % (one decade) per 40 ms
+    static constexpr double kBypassFadeSeconds = 0.01;
     static constexpr double kReverbLevel = 1.4;
 
     struct Delay {
@@ -424,11 +441,13 @@ private:
         bodyDb_ = p(kBody);
         mix_ = p(kMix) * 0.01;
         outputDb_ = p(kOutput);
+        bypassed_ = normalized_[static_cast<std::size_t>(kBypass)] >= 0.5;
     }
     void updateTimeCoefficients() {
         // One-pole reaching 90 % after T: coef = exp(-ln(10) / (T · fs)).
         diveCoef_ = std::exp(-2.302585092994046 / (std::max(diveSeconds_, 1e-4) * sampleRate_));
         returnCoef_ = std::exp(-2.302585092994046 / (std::max(returnSeconds_, 1e-4) * sampleRate_));
+        finalCoef_ = std::exp(-2.302585092994046 / (kFinalSeconds * sampleRate_));
     }
 
     std::array<double, kNumParams> normalized_{};
@@ -439,7 +458,9 @@ private:
     int maxBlock_ = 512;
     double topCutoff_ = 21000.0, logCutoffRatio_ = 0.0;
     double bodyG_ = 0.0, reverbHpG_ = 0.0, dampG_ = 0.0;
-    double diveCoef_ = 0.0, returnCoef_ = 0.0;
+    double diveCoef_ = 0.0, returnCoef_ = 0.0, finalCoef_ = 0.0;
+    bool bypassed_ = false;
+    double bypassFade_ = 0.0, bypassStep_ = 0.0;
     double depth_ = 0.0;
     Smoother resSmooth_, wobbleSmooth_, reverbSmooth_, bodySmooth_, mixSmooth_, outSmooth_;
     std::array<Channel, kMaxChannels> channels_{};

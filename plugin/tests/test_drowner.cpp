@@ -176,6 +176,44 @@ void testReverbTail() {
     FX_CHECK(fxtest::maxAbsDiff(burst, y[0], static_cast<std::size_t>(7.0 * sr), n) == 0.0, "bit-exact dry again after the tail");
 }
 
+void testReturnToDry() {
+    std::printf("return to bit-exact dry\n");
+    const double sr = 48000.0;
+    const auto x = fxtest::makeVocal(sr, 4.0, 140.0, 3, 0.6);
+    auto e = makeEngine(sr, {{kDiveTime, 0.05}, {kReturnTime, 1.0}, {kReverb, 0}});
+    const Buffer y = run(e, Buffer{x, x}, 256, {at(0, kDepth, 100), at(static_cast<long>(sr), kDepth, 0)});
+    // 1 % depth is reached 2 return times after the release, the rest is finished within ~0.15 s.
+    const auto from = static_cast<std::size_t>(3.2 * sr);
+    FX_CHECK(fxtest::maxAbsDiff(x, y[0], from, x.size()) == 0.0, "bit-exact dry 2.2 s after a 1 s return");
+    FX_CHECK(fxtest::maxStep(y[0], static_cast<std::size_t>(2.5 * sr), from) < 2.0 * fxtest::maxStep(x, static_cast<std::size_t>(2.5 * sr), from),
+             "final approach is click-free");
+}
+
+void testBypass() {
+    std::printf("host bypass\n");
+    const double sr = 48000.0;
+    const auto x = fxtest::makeVocal(sr, 3.0, 140.0, 4, 0.6);
+    const std::vector<std::pair<int, double>> params{{kDiveTime, 0.01}, {kReverb, 60}, {kResonance, 80}};
+    const std::vector<TimedEvent> depth{at(0, kDepth, 100)};
+    auto ref = makeEngine(sr, params);
+    const Buffer wet = run(ref, Buffer{x, x}, 256, depth);
+    auto ev = depth;
+    for (const auto& b : {at(48000, kBypass, 1), at(96000, kBypass, 0), at(120000, kBypass, 1), at(120240, kBypass, 0)})
+        ev.push_back(b);
+    auto e = makeEngine(sr, params);
+    const Buffer y = run(e, Buffer{x, x}, 173, ev);
+    const auto fade = static_cast<std::size_t>(0.01 * sr);
+    FX_CHECK(fxtest::maxAbsDiff(wet[0], y[0], 0, 48000) == 0.0, "identical to unbypassed before the bypass");
+    FX_CHECK(fxtest::maxAbsDiff(x, y[0], 48000 + fade + 1, 96000) == 0.0 && fxtest::maxAbsDiff(x, y[1], 48000 + fade + 1, 96000) == 0.0,
+             "bypassed -> bit-exact dry after 10 ms (reverb tail cut by the fade)");
+    FX_CHECK(fxtest::maxAbsDiff(x, y[0], 48000, 48000 + fade / 2) > 1e-3, "bypass is a crossfade, not a jump");
+    FX_CHECK(fxtest::maxAbsDiff(wet[0], y[0], 96000 + fade + 1, 120000) < 1e-9, "un-bypass resumes the running wet state");
+    const double bound = 1.2 * std::max(fxtest::maxStep(x), fxtest::maxStep(wet[0]));
+    const double got = fxtest::maxStep(y[0]);
+    FX_CHECK(got <= bound, "bypass toggling click-free: step %.4f (bound %.4f)", got, bound);
+    FX_CHECK(defaultNormalized(kBypass) == 0.0, "bypass default off");
+}
+
 void testSampleRatesFinite() {
     std::printf("sample rates / stress\n");
     for (double sr : {44100.0, 48000.0, 88200.0, 96000.0, 176400.0, 192000.0}) {
@@ -283,6 +321,8 @@ int main(int argc, char** argv) {
     testResonanceStable();
     testTiming();
     testReverbTail();
+    testReturnToDry();
+    testBypass();
     testSampleRatesFinite();
     testBlockSizeInvariance();
     testAutomationClickFree();

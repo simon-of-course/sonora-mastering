@@ -200,6 +200,55 @@ void testFreeRun() {
     }
 }
 
+void testScopeHelpers() {
+    std::printf("scope helpers\n");
+    const double sr = 48000.0, bpm = 93.0;
+    {   // scopePhase = (ppq of the last sample mod 8) / 8 with host position.
+        auto eng = makeEngine(sr, {{kDivision, 7}});
+        const double start = 13.7, qps = bpm / (60.0 * sr);
+        Buffer x = dc(2, 500);
+        std::vector<const double*> in{x[0].data(), x[1].data()};
+        std::vector<double*> out{x[0].data(), x[1].data()};
+        double maxErr = 0.0;
+        for (int b = 0; b < 200; ++b) {
+            TransportInfo t;
+            t.tempo = bpm;
+            t.hasPosition = true;
+            t.ppqPosition = start + b * 500 * qps;
+            eng.process(in.data(), out.data(), 2, 500, t);
+            const double last = t.ppqPosition + 499 * qps;
+            const double expect = std::fmod(last, 8.0) / 8.0;
+            double err = std::abs(eng.meters().scopePhase - expect);
+            maxErr = std::max(maxErr, std::min(err, 1.0 - err));
+        }
+        FX_CHECK(maxErr < 1e-5, "scopePhase sync error %.2e", maxErr);
+    }
+    {   // Sync off: scopePhase = (steps mod 8) / 8.
+        auto eng = makeEngine(sr, {{kSync, 0}, {kRate, 7}});
+        const Buffer y = run(eng, dc(1, 48000), 480, Setup{sr, bpm});
+        const double expect = std::fmod(47999.0 * 7.0 / sr, 8.0) / 8.0;
+        FX_CHECK(std::abs(eng.meters().scopePhase - expect) < 1e-5, "scopePhase free %.6f vs %.6f",
+                 eng.meters().scopePhase, expect);
+    }
+    for (int shape = 0; shape < 3; ++shape) {  // patternGain matches the engine output on DC.
+        const std::vector<std::pair<int, double>> params{{kDivision, 3}, {kDuty, 60}, {kSwing, 30}, {kOffset, 25},
+                                                         {kShape, shape}, {kStereo, 1}, {kDepth, 80}, {kMix, 90}};
+        auto eng = makeEngine(sr, params);
+        std::array<double, kNumParams> norm{};
+        for (int id = 0; id < kNumParams; ++id) norm[static_cast<std::size_t>(id)] = eng.getParameter(id);
+        Setup s{sr, bpm};
+        s.startPpq = 2.0;
+        const Buffer y = run(eng, dc(2, 96000), 256, s);
+        double maxErr = 0.0;
+        for (int ch = 0; ch < 2; ++ch)
+            for (std::size_t i = 2000; i < y[0].size(); ++i) {
+                const double ppq = s.startPpq + static_cast<double>(i) * bpm / (60.0 * sr);
+                maxErr = std::max(maxErr, std::abs(y[static_cast<std::size_t>(ch)][i] - patternGain(norm.data(), ppq, ch, bpm, true)));
+            }
+        FX_CHECK(maxErr < 1e-6, "patternGain vs engine (shape %d) max error %.2e", shape, maxErr);
+    }
+}
+
 void testTransportStop() {
     std::printf("transport stop\n");
     const double sr = 48000.0;
@@ -286,6 +335,25 @@ void testEnableAndDepthClickFree() {
         const double got = fxtest::maxStep(y[0], 11000, sn.size());
         FX_CHECK(got <= 1.2 * bound, "gate-tone switching step %.5f vs input %.5f", got, bound);
     }
+}
+
+void testBypass() {
+    std::printf("host bypass\n");
+    const double sr = 48000.0;
+    const auto sn = fxtest::sine(200.0, 0.5, sr, static_cast<std::size_t>(sr * 1.9));
+    const double bound = fxtest::maxStep(sn);
+    const auto fade = static_cast<std::size_t>(ShutterEngine::kFadeSeconds * sr);
+    // 120 BPM, 1/1, duty 10 %: closed (silent at depth 100) from 0.2 s to 2.0 s.
+    auto e = makeEngine(sr, {{kDivision, 0}, {kDuty, 10}, {kDepth, 100}, {kGateTone, 0}});
+    const Buffer y = run(e, Buffer{sn}, 77, Setup{sr, 120.0},
+                         {at(24000, kBypass, 1), at(60000, kBypass, 0), at(80000, kBypass, 1), at(80200, kBypass, 0)});
+    FX_CHECK(fxtest::peak(y[0], 20000, 24000) < 1e-9, "closed gate before bypass");
+    FX_CHECK(fxtest::maxAbsDiff(sn, y[0], 24000 + fade + 1, 60000) == 0.0, "bypassed -> bit-exact dry after %zu samples", fade);
+    FX_CHECK(fxtest::maxAbsDiff(sn, y[0], 24000, 24000 + fade / 2) > 0.05, "bypass is a crossfade, not a jump");
+    FX_CHECK(fxtest::peak(y[0], 60000 + fade + 1, 80000) < 1e-9, "un-bypass resumes the gate");
+    const double got = fxtest::maxStep(y[0], 12000, sn.size());
+    FX_CHECK(got <= 1.2 * bound, "bypass toggling step %.5f vs input %.5f", got, bound);
+    FX_CHECK(listIndex(kBypass, defaultNormalized(kBypass)) == 0, "bypass default off");
 }
 
 void testGlaettung() {
@@ -465,9 +533,11 @@ int main(int argc, char** argv) {
     testGateAlignment();
     testTripletDotted();
     testFreeRun();
+    testScopeHelpers();
     testTransportStop();
     testDisabledBitExact();
     testEnableAndDepthClickFree();
+    testBypass();
     testGlaettung();
     testPump();
     testPingPong();
