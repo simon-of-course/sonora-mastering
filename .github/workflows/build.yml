@@ -26,9 +26,13 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install dependencies
+        timeout-minutes: 15
         run: |
-          sudo apt-get update -qq
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+          # man-db triggers can stall for many minutes on hosted runners; they are not needed here.
+          sudo rm -f /var/lib/man-db/auto-update
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 \
+            install -y -qq \
             cmake ninja-build pkg-config g++ \
             libx11-xcb-dev libxcb-util-dev libxcb-cursor-dev libxcb-xkb-dev libxcb-keysyms1-dev \
             libxkbcommon-dev libxkbcommon-x11-dev libfontconfig1-dev libfreetype-dev libcairo2-dev \
