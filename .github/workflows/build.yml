@@ -1,0 +1,257 @@
+name: Build VST3
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["vst3-v*"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+permissions:
+  contents: read
+
+env:
+  PLUGINS: SONORA_Master SONORA_Shutter SONORA_Drowner
+
+jobs:
+  linux:
+    name: Linux tests + validator
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+            cmake ninja-build pkg-config g++ \
+            libx11-xcb-dev libxcb-util-dev libxcb-cursor-dev libxcb-xkb-dev libxcb-keysyms1-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev libfontconfig1-dev libfreetype-dev libcairo2-dev \
+            libpango1.0-dev libgtkmm-3.0-dev libsqlite3-dev libexpat1-dev \
+            xvfb x11-utils xdotool imagemagick
+
+      # ASan aborts at startup with the high mmap ASLR entropy of recent runner kernels.
+      - name: Make ASan compatible with runner kernel
+        run: sudo sysctl -w vm.mmap_rnd_bits=28
+
+      - name: Unit tests (O2 -Werror + ASan/UBSan)
+        run: plugin/tests/run_tests.sh
+
+      - name: Resolve pinned VST3 SDK commit
+        id: sdk
+        run: echo "tag=$(plugin/tools/fetch_sdk.sh --print-tag)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache VST3 SDK
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/vst3sdk
+          key: vst3sdk-${{ steps.sdk.outputs.tag }}
+
+      - name: Fetch VST3 SDK
+        run: plugin/tools/fetch_sdk.sh "$RUNNER_TEMP/vst3sdk"
+
+      - name: Configure
+        run: |
+          cmake -S plugin -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DSMTG_CREATE_PLUGIN_LINK=OFF \
+            -DSONORA_BUILD_HOST_TOOLS=ON \
+            -DSONORA_BUILD_TESTS=ON \
+            -DFETCHCONTENT_SOURCE_DIR_VST3SDK="$RUNNER_TEMP/vst3sdk"
+
+      - name: Build plug-ins, validator, editorhost, tests
+        run: cmake --build build --parallel
+
+      - name: CTest
+        run: ctest --test-dir build --output-on-failure --no-tests=ignore
+
+      - name: Steinberg validator
+        run: |
+          status=0
+          for p in $PLUGINS; do
+            echo "::group::validator $p"
+            if build/bin/Release/validator "build/VST3/Release/$p.vst3"; then
+              echo "::endgroup::"
+            else
+              echo "::endgroup::"
+              echo "::error::validator failed for $p"
+              status=1
+            fi
+          done
+          exit $status
+
+      - name: Editor screenshots (Xvfb + editorhost)
+        continue-on-error: true
+        run: plugin/tools/screenshot_editor.sh build screenshots
+
+      - name: Upload editor screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: editor-screenshots-linux
+          path: screenshots/
+          if-no-files-found: ignore
+
+  windows:
+    name: Windows x64 (MSVC)
+    runs-on: windows-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Disable CRLF conversion
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v4
+
+      - name: Enable long paths
+        run: git config --global core.longpaths true
+
+      - name: Resolve paths and pinned VST3 SDK commit
+        id: sdk
+        run: |
+          echo "tag=$(plugin/tools/fetch_sdk.sh --print-tag)" >> "$GITHUB_OUTPUT"
+          echo "root=$(cygpath -m "$RUNNER_TEMP")" >> "$GITHUB_OUTPUT"
+
+      - name: Cache VST3 SDK
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/vst3sdk
+          key: vst3sdk-${{ steps.sdk.outputs.tag }}-windows
+
+      - name: Fetch VST3 SDK
+        run: plugin/tools/fetch_sdk.sh "${{ steps.sdk.outputs.root }}/vst3sdk"
+
+      # Short build path keeps VSTGUI object paths below MAX_PATH.
+      - name: Configure (Visual Studio, x64)
+        run: |
+          cmake -S plugin -B "${{ steps.sdk.outputs.root }}/b" -A x64 \
+            -DSMTG_CREATE_PLUGIN_LINK=OFF \
+            -DSONORA_BUILD_HOST_TOOLS=OFF \
+            -DSONORA_BUILD_TESTS=OFF \
+            -DSONORA_MSVC_STATIC_RUNTIME=ON \
+            -DFETCHCONTENT_SOURCE_DIR_VST3SDK="${{ steps.sdk.outputs.root }}/vst3sdk"
+
+      - name: Build Release
+        run: |
+          # shellcheck disable=SC2086 # $PLUGINS is a word list
+          cmake --build "${{ steps.sdk.outputs.root }}/b" --config Release --parallel \
+            --target validator $PLUGINS
+
+      - name: Steinberg validator
+        run: |
+          B="${{ steps.sdk.outputs.root }}/b"
+          status=0
+          for p in $PLUGINS; do
+            echo "::group::validator $p"
+            if "$B/bin/Release/validator.exe" "$B/VST3/Release/$p.vst3"; then
+              echo "::endgroup::"
+            else
+              echo "::endgroup::"
+              echo "::error::validator failed for $p"
+              status=1
+            fi
+          done
+          exit $status
+
+      - name: Package bundles (zip with top-level SONORA_X.vst3 folder)
+        shell: python
+        run: |
+          import os, sys, zipfile
+          root = r"${{ steps.sdk.outputs.root }}/b/VST3/Release"
+          out = os.path.join(os.environ["GITHUB_WORKSPACE"], "dist")
+          os.makedirs(out, exist_ok=True)
+          skip_ext = (".pdb", ".ilk", ".exp", ".lib")
+          for name in os.environ["PLUGINS"].split():
+              bundle = name + ".vst3"
+              base = os.path.join(root, bundle)
+              binary = os.path.join(base, "Contents", "x86_64-win", bundle)
+              if not os.path.isfile(binary):
+                  sys.exit(f"missing plug-in binary {binary}")
+              zpath = os.path.join(out, bundle + ".zip")
+              with zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
+                  for dirpath, dirnames, filenames in os.walk(base):
+                      dirnames.sort()
+                      rel_dir = os.path.relpath(dirpath, root).replace(os.sep, "/")
+                      if not filenames and not dirnames:
+                          z.writestr(rel_dir + "/", "")
+                      for f in sorted(filenames):
+                          if f.lower().endswith(skip_ext):
+                              continue
+                          z.write(os.path.join(dirpath, f), rel_dir + "/" + f)
+              with zipfile.ZipFile(zpath) as z:
+                  print(f"== {zpath}")
+                  for info in z.infolist():
+                      print(f"{info.file_size:>10}  {info.filename}")
+
+      - name: Check bundles are self-contained (no VC++ runtime DLL imports)
+        shell: python
+        run: |
+          import subprocess, sys, os
+          subprocess.run([sys.executable, "-m", "pip", "install", "-q", "pefile"], check=True)
+          import pefile
+          root = r"${{ steps.sdk.outputs.root }}/b/VST3/Release"
+          bad = ("msvcp", "vcruntime", "ucrtbase", "api-ms-win-crt", "concrt", "vcomp")
+          failed = False
+          for name in os.environ["PLUGINS"].split():
+              path = os.path.join(root, name + ".vst3", "Contents", "x86_64-win", name + ".vst3")
+              pe = pefile.PE(path, fast_load=True)
+              pe.parse_data_directories(directories=[pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_IMPORT"]])
+              dlls = sorted(e.dll.decode().lower() for e in getattr(pe, "DIRECTORY_ENTRY_IMPORT", []))
+              runtime = [d for d in dlls if d.startswith(bad)]
+              print(f"{name}: {', '.join(dlls)}")
+              if runtime:
+                  print(f"::error::{name} depends on runtime DLLs {runtime}")
+                  failed = True
+          sys.exit(1 if failed else 0)
+
+      - name: Upload SONORA_Master.vst3.zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: SONORA_Master.vst3.zip
+          path: dist/SONORA_Master.vst3.zip
+          if-no-files-found: error
+      - name: Upload SONORA_Shutter.vst3.zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: SONORA_Shutter.vst3.zip
+          path: dist/SONORA_Shutter.vst3.zip
+          if-no-files-found: error
+      - name: Upload SONORA_Drowner.vst3.zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: SONORA_Drowner.vst3.zip
+          path: dist/SONORA_Drowner.vst3.zip
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub release
+    if: startsWith(github.ref, 'refs/tags/vst3-v')
+    needs: [linux, windows]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: SONORA_*.vst3.zip
+          path: dist
+          merge-multiple: true
+
+      - name: Create or update release and upload zips
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          ls -la dist
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --verify-tag --title "SONORA VST3 ${TAG#vst3-v}" --generate-notes
+          fi
+          gh release upload "$TAG" dist/SONORA_Master.vst3.zip dist/SONORA_Shutter.vst3.zip dist/SONORA_Drowner.vst3.zip --clobber
