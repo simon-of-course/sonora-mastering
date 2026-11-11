@@ -386,6 +386,17 @@ public:
         return sonora::ui::createMasterView(name, attributes, description, editor, uiContext_);
     }
 
+    // A momentary "Analyse starten" click whose 250 ms release timer has not fired yet would leave
+    // the parameter at 1 once the editor's parameter listeners are gone; reset it while they exist.
+    void willClose(VSTGUI::VST3Editor*) override {
+        const auto id = static_cast<ParamID>(M::kAnalyze);
+        if (getParamNormalized(id) < 0.5) return;
+        beginEdit(id);
+        setParamNormalized(id, 0.0);
+        performEdit(id, 0.0);
+        endEdit(id);
+    }
+
 private:
     // Analyse starten: rising edge is the trigger (see header comment).
     void analyzeValue(double normalized) {
