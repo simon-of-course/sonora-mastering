@@ -242,6 +242,10 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: plugin/release-notes
+
       - uses: actions/download-artifact@v4
         with:
           pattern: SONORA_*.vst3.zip
@@ -255,7 +259,15 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           ls -la dist
+          NOTES="plugin/release-notes/${TAG}.md"
+          TITLE="SONORA Master, Shutter & Drowner VST3 ${TAG#vst3-v}"
           if ! gh release view "$TAG" >/dev/null 2>&1; then
-            gh release create "$TAG" --verify-tag --title "SONORA VST3 ${TAG#vst3-v}" --generate-notes
+            if [ -f "$NOTES" ]; then
+              gh release create "$TAG" --verify-tag --title "$TITLE" --notes-file "$NOTES" --latest
+            else
+              gh release create "$TAG" --verify-tag --title "$TITLE" --generate-notes --latest
+            fi
+          elif [ -f "$NOTES" ]; then
+            gh release edit "$TAG" --title "$TITLE" --notes-file "$NOTES"
           fi
           gh release upload "$TAG" dist/SONORA_Master.vst3.zip dist/SONORA_Shutter.vst3.zip dist/SONORA_Drowner.vst3.zip --clobber
