@@ -136,25 +136,28 @@ input; enable/disable and start/stop use a short fade to avoid clicks.
 | Form | Hart / Weich / Pumpe (Hart) | Hard gate, soft gate or trap-style pump |
 | Stereo | Mono / Ping-Pong (Mono) | Ping-Pong alternates left and right (stereo buses) |
 | Gate-Klang | Stumm / Telefon / Dumpf (Stumm) | The closed part becomes silence, a telephone band or a dull low-pass |
+| Bypass (ID 13) | on/off (off) | VST3 host bypass with a click-free 10 ms crossfade to dry; no UI control – use FL Studio's plug-in bypass or automate it |
 
 ## SONORA Drowner
 
 Pulls the vocal under water and lets it surface again. Automate **Unterwasser-Anteil**; **Abtauchzeit** and
 **Auftauchzeit** set how fast the sound dives and comes back. A 24 dB/oct modulation-stable low-pass (cascaded TPT
 state-variable filters) sweeps from above 20 kHz down to 350 Hz, with gentle automatic make-up gain. At
-Unterwasser-Anteil 0 % the output is a bit-exact copy of the input (once a Wasserhall tail has died away).
+Unterwasser-Anteil 0 % the output is a bit-exact copy of the input (once a Wasserhall tail has died away) – whatever
+**Ausgang** is set to, because Ausgang only scales the wet sound.
 
 | Parameter | Range (default) | Function |
 |---|---|---|
 | Unterwasser-Anteil | 0–100 % (0) | Depth of the effect; meant to be automated |
-| Abtauchzeit | 0.01–2 s (0.05 s) | Time to dive in |
+| Abtauchzeit | 0.01–2 s, logarithmic (0.05 s) | Time to dive in |
 | Auftauchzeit | 0.2–6 s (2 s) | Time to come back up |
 | Resonanz | 0–100 % (30 %) | Filter resonance |
 | Wobble | 0–100 % (35 %) | Moving cutoff and slight stereo detune |
 | Wasserhall | 0–100 % (30 %) | Dark, small diffuse reverb |
 | Körper | 0–6 dB (2.5 dB) | Low-body shelf, scaled by depth |
 | Mix | 0–100 % (100 %) | Dry/wet |
-| Ausgang | −12 to +6 dB (0) | Level of the wet sound |
+| Ausgang | −12 to +6 dB (0) | Level of the wet/underwater sound only – the dry signal is never touched, so 0 % stays clean |
+| Bypass (ID 9) | on/off (off) | VST3 host bypass with a click-free 10 ms crossfade to dry; no UI control – use FL Studio's plug-in bypass or automate it |
 
 ## Build
 
