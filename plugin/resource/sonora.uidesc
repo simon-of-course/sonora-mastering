@@ -14,6 +14,9 @@
                          grp-analyze
     Master-only "0=2"  : grp-loudness, grp-ceiling, grp-clipper (limiter/clipper meters dim too)
     always             : Stärke, grp-input, grp-output, grp-glue, grp-saturation, EQ faders
+  "Analysieren" (tag 17) is momentary: SonoraToggle with sonora-momentary sends 1, then 0 about
+  250 ms later in a separate edit gesture (plain-VSTGUI fallback: kick-style). The processor
+  starts the analysis on the rising edge 0 -> 1.
 -->
 <vstgui-ui-description version="1">
   <fonts>
@@ -110,7 +113,7 @@
     </view>
     <view class="CViewContainer" name="section-eq" custom-view-name="SonoraCard" sonora-style="card" sonora-title="Equalizer" origin="180, 68" size="600, 312" background-color="sonora.card" background-color-draw-style="filled" transparent="false">
       <view class="CViewContainer" name="grp-analyze" custom-view-name="SonoraCard" sonora-style="none" sonora-active-when="0=1,2" sonora-steps="2" origin="478, 7" size="110, 24" background-color="sonora.clear" background-color-draw-style="filled" transparent="true">
-        <view class="CTextButton" custom-view-name="SonoraToggle" control-tag="Master::Analyze" origin="0, 0" size="110, 24" title="Analysieren" font="sonora.small.bold" kick-style="false" min-value="0" max-value="1" default-value="0" sonora-on-color="sonora.accent2" text-color="sonora.text" text-color-highlighted="sonora.text" frame-color="sonora.stroke" frame-color-highlighted="sonora.accent" frame-width="1" round-radius="9"/>
+        <view class="CTextButton" custom-view-name="SonoraToggle" control-tag="Master::Analyze" origin="0, 0" size="110, 24" title="Analysieren" font="sonora.small.bold" kick-style="true" min-value="0" max-value="1" default-value="0" sonora-on-color="sonora.accent2" sonora-momentary="true" text-color="sonora.text" text-color-highlighted="sonora.text" frame-color="sonora.stroke" frame-color-highlighted="sonora.accent" frame-width="1" round-radius="9"/>
       </view>
       <view class="CView" custom-view-name="SonoraEqGraph" origin="12, 36" size="354, 200"/>
       <view class="CTextLabel" origin="378, 36" size="42, 14" title="60" font="sonora.small.bold" font-color="sonora.muted" text-alignment="center" transparent="true" style-no-frame="true" mouse-enabled="false"/>

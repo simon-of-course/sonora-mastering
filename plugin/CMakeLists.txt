@@ -135,4 +135,24 @@ if(SONORA_BUILD_TESTS)
         sonora_apply_common_settings(sonora_render)
         target_include_directories(sonora_render PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
     endif()
+
+    # Loads the built bundles like a host: state migration, round trip, latency, processing.
+    add_executable(sonora_hostcheck ${CMAKE_CURRENT_SOURCE_DIR}/tools/sonora_hostcheck.cpp
+                                    ${vst3sdk_SOURCE_DIR}/public.sdk/source/common/memorystream.cpp
+                                    ${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/hosting/plugprovider.cpp)
+    if(WIN32)
+        target_sources(sonora_hostcheck PRIVATE ${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/hosting/module_win32.cpp)
+    elseif(APPLE)
+        target_sources(sonora_hostcheck PRIVATE ${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/hosting/module_mac.mm)
+    else()
+        target_sources(sonora_hostcheck PRIVATE ${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/hosting/module_linux.cpp)
+    endif()
+    target_link_libraries(sonora_hostcheck PRIVATE sdk_hosting)
+    target_compile_features(sonora_hostcheck PRIVATE cxx_std_17)
+    add_dependencies(sonora_hostcheck SONORA_Master SONORA_Shutter SONORA_Drowner)
+    add_test(NAME hostcheck
+             COMMAND sonora_hostcheck
+                     $<TARGET_PROPERTY:SONORA_Master,SMTG_PLUGIN_PACKAGE_PATH>
+                     $<TARGET_PROPERTY:SONORA_Shutter,SMTG_PLUGIN_PACKAGE_PATH>
+                     $<TARGET_PROPERTY:SONORA_Drowner,SMTG_PLUGIN_PACKAGE_PATH>)
 endif()

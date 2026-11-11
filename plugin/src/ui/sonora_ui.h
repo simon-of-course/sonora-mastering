@@ -15,12 +15,12 @@
 //        VSTGUI::CView* createCustomView(VSTGUI::UTF8StringPtr name, const VSTGUI::UIAttributes& a,
 //                                         const VSTGUI::IUIDescription* d, VSTGUI::VST3Editor* e) override
 //        { return sonora::ui::createMasterView(name, a, d, e, uiContext_); }
-//   4. Audio thread: publish meters once per block (see meter_bridge.h), e.g.
-//        meters_.publishLevels(inPeakL, inPeakR, outPeakL, outPeakR);
-//        meters_.publishLoudness(m, s, i, tpMax); meters_.publishDynamics(glueGr, limGr, clip, corr);
-//        if (meters_.consumeLoudnessResetRequest()) loudness.resetIntegrated();
-//        meters_.publishAutoEq(gains5); meters_.publishSampleRate(sr);
-//        meters_.publishAnalysisStatus(...) / publishAnalysisResult(...)   (v0.1 AnalysisReadout semantics)
+//   4. Audio thread: publish meters once per block (see meter_bridge.h). Master:
+//        if (meters_.consumeLoudnessResetRequest()) engine_.resetLoudness();
+//        engine_.process(...);
+//        meters_.publish(engine_.meters());      // copies the whole master::MasterMeters snapshot
+//        meters_.publishSampleRate(sampleRate);  // once in setupProcessing() is enough
+//      (granular publishLevels / publishLoudness / ... calls exist as well.)
 //      Shutter: meters_.publish(gainL, gainR, phase01, enabled, playing) where
 //        phase01 = fmod(ProcessContext::projectTimeMusic, 8.0) / 8.0 (position in the 2-bar scope
 //        window; free-rate mode: fmod(cycles, 8) / 8). Drowner: meters_.publish(depth, cutoffHz).
@@ -64,6 +64,7 @@
 
 #include "meter_bridge.h"
 #include "../dsp/dsp_common.h"
+#include "../dsp/master_engine.h" // EQ graph uses MasterEngine::eqResponseDb (pure static helper)
 
 #include "vstgui/lib/ccolor.h"
 #include "vstgui/lib/cdrawcontext.h"
@@ -137,6 +138,20 @@ struct DrownerUiContext : UiContext {
 namespace master_ids {
 constexpr std::uint32_t kMode = 0, kEq60 = 11, kAnalyze = 17, kCeiling = 19;
 }
+static_assert(master_ids::kMode == sonora::dsp::master::kMode && master_ids::kEq60 == sonora::dsp::master::kEq60
+                  && master_ids::kAnalyze == sonora::dsp::master::kAnalyze
+                  && master_ids::kCeiling == sonora::dsp::master::kCeiling,
+              "UI parameter ids must match the master engine");
+static_assert(int(kAnalysisReady) == int(sonora::dsp::master::kAnalysisReady)
+                  && int(kAnalysisRunning) == int(sonora::dsp::master::kAnalysisRunning)
+                  && int(kAnalysisComplete) == int(sonora::dsp::master::kAnalysisComplete)
+                  && int(kAnalysisNoVocal) == int(sonora::dsp::master::kAnalysisNoVocal)
+                  && int(kAnalysisMissingSidechain) == int(sonora::dsp::master::kAnalysisMissingSidechain)
+                  && int(kAnalysisWrongMode) == int(sonora::dsp::master::kAnalysisWrongMode)
+                  && int(kAnalysisTooQuiet) == int(sonora::dsp::master::kAnalysisTooQuiet)
+                  && int(kAnalysisCompleteMixOnly) == int(sonora::dsp::master::kAnalysisCompleteMixOnly),
+              "meter bridge analysis states must match the master engine");
+static_assert(MasterMeterBridge::kBands == sonora::dsp::master::kBands, "band count mismatch");
 namespace shutter_ids {
 constexpr std::uint32_t kEnable = 0, kSync = 1, kDivision = 2, kRate = 3, kDepth = 4, kMix = 5,
                         kSmoothing = 6, kPulseWidth = 7, kSwing = 8, kForm = 9, kStereo = 10,
@@ -562,9 +577,57 @@ public:
     void setOnColor(CColor c) { onColor_ = c; }
     void setBig(bool big) { big_ = big; }
 
+    // Momentary trigger (e.g. "Analysieren", param 17): a click sends max in its own edit gesture
+    // and max -> min ~250 ms later in a second gesture, so the processor sees the rising edge in a
+    // separate block even if it only reads the last point of each parameter queue (VSTGUI's
+    // kKickStyle sends 1 and 0 back-to-back inside one gesture).
+    void setMomentary(bool m) {
+        momentary_ = m;
+        if (m) setWantsIdle(true);
+    }
+
+    VSTGUI::CMouseEventResult onMouseDown(CPoint& where, const VSTGUI::CButtonState& buttons) override {
+        if (!momentary_) return CTextButton::onMouseDown(where, buttons);
+        if (!(buttons & VSTGUI::kLButton)) return VSTGUI::kMouseEventNotHandled;
+        if (!releasePending_) setPressed(true);
+        return VSTGUI::kMouseEventHandled;
+    }
+    VSTGUI::CMouseEventResult onMouseMoved(CPoint& where, const VSTGUI::CButtonState& buttons) override {
+        if (!momentary_) return CTextButton::onMouseMoved(where, buttons);
+        if (buttons & VSTGUI::kLButton) setPressed(!releasePending_ && getViewSize().pointInside(where));
+        return VSTGUI::kMouseEventHandled;
+    }
+    VSTGUI::CMouseEventResult onMouseUp(CPoint& where, const VSTGUI::CButtonState& buttons) override {
+        if (!momentary_) return CTextButton::onMouseUp(where, buttons);
+        if (pressed_ && getViewSize().pointInside(where)) fire();
+        setPressed(false);
+        return VSTGUI::kMouseEventHandled;
+    }
+    VSTGUI::CMouseEventResult onMouseCancel() override {
+        if (!momentary_) return CTextButton::onMouseCancel();
+        setPressed(false);
+        return VSTGUI::kMouseEventHandled;
+    }
+    void onKeyboardEvent(VSTGUI::KeyboardEvent& event) override {
+        if (momentary_ && event.type == VSTGUI::EventType::KeyDown && event.modifiers.empty()
+            && event.virt == VSTGUI::VirtualKey::Return) {
+            fire();
+            event.consumed = true;
+            return;
+        }
+        CTextButton::onKeyboardEvent(event);
+    }
+    void onIdle() override {
+        if (releasePending_ && std::chrono::steady_clock::now() >= releaseAt_) release();
+    }
+    bool removed(CView* parent) override {
+        if (releasePending_) release(); // never leave the trigger parameter stuck at max
+        return CTextButton::removed(parent);
+    }
+
     void draw(VSTGUI::CDrawContext* c) override {
         const CRect r = getViewSize();
-        const bool on = getValue() > (getMin() + getMax()) * 0.5f;
+        const bool on = pressed_ || getValue() > (getMin() + getMax()) * 0.5f;
         const double radius = std::min(r.getHeight() * 0.5, 9.0);
         c->setDrawMode(VSTGUI::kAntiAliasing | VSTGUI::kNonIntegralMode);
         if (on) {
@@ -590,9 +653,38 @@ public:
     CLASS_METHODS(Toggle, CTextButton)
 
 private:
+    void setPressed(bool p) {
+        if (p != pressed_) {
+            pressed_ = p;
+            invalid();
+        }
+    }
+    void fire() {
+        if (releasePending_) return;
+        beginEdit();
+        value = getMax();
+        valueChanged();
+        endEdit();
+        releasePending_ = true;
+        releaseAt_ = std::chrono::steady_clock::now() + std::chrono::milliseconds(250);
+        invalid();
+    }
+    void release() {
+        releasePending_ = false;
+        beginEdit();
+        value = getMin();
+        valueChanged();
+        endEdit();
+        invalid();
+    }
+
     detail::Fonts fonts_;
     CColor onColor_ = theme::accent;
     bool big_ = false;
+    bool momentary_ = false;
+    bool pressed_ = false;
+    bool releasePending_ = false;
+    std::chrono::steady_clock::time_point releaseAt_{};
 };
 
 // =================================================================================================
@@ -759,6 +851,7 @@ public:
         : CView(size), ctx_(ctx), fonts_(std::move(fonts)) {
         setWantsIdle(true);
         setMouseEnabled(false);
+        for (std::size_t i = 0; i < plain_.size(); ++i) plain_[i] = sonora::dsp::master::kParams[i].defaultValue;
         poll();
         rebuild(); // the view factory skips setViewSize when the size is unchanged
     }
@@ -766,7 +859,7 @@ public:
     // Manual override when no parameter getter is available (user EQ gains in dB).
     void setBandGains(const std::array<double, 5>& db) {
         manual_ = true;
-        user_ = db;
+        for (std::size_t i = 0; i < 5; ++i) plain_[sonora::dsp::master::kEq60 + i] = db[i];
         rebuild();
     }
 
@@ -865,7 +958,8 @@ public:
             const CPoint h(xOf(kFreq[i]), yOf(totalAt(kFreq[i])));
             detail::circle(c, h, 9.0, withAlpha(theme::accent, 50));
             detail::circle(c, h, 6.5, theme::inset);
-            c->setFrameColor(std::abs(user_[i]) > 0.05 ? theme::accent2 : theme::accent);
+            c->setFrameColor(std::abs(plain_[sonora::dsp::master::kEq60 + i]) > 0.05 ? theme::accent2
+                                                                                       : theme::accent);
             c->setLineWidth(2.0);
             c->setLineStyle(VSTGUI::kLineSolid);
             c->drawEllipse(CRect(h.x - 6.5, h.y - 6.5, h.x + 6.5, h.y + 6.5), VSTGUI::kDrawStroked);
@@ -897,18 +991,24 @@ private:
         db = std::clamp(db, -kRangeDb - 1.0, kRangeDb + 1.0);
         return pr.top + pr.getHeight() * (0.5 - db / (2.0 * kRangeDb));
     }
+    // Exactly the engine's static EQ section: 5 bands + Bass (60 Hz shelf) + Beat-Höhen (12 kHz
+    // shelf) + Stimmen-Präsenz / Nasalität / Resonanzen bells + preset EQ scaled by Stärke +
+    // auto-EQ + mode-dependent high-pass (80 Hz in Vocal mode).
     double totalAt(double f) const {
-        std::array<double, 5> g{};
-        for (std::size_t i = 0; i < 5; ++i) g[i] = user_[i] + auto_[i];
-        return responseDb(g, f, sr_);
+        return sonora::dsp::MasterEngine::eqResponseDb(plain_, auto_.data(), sr_, f);
     }
 
     bool poll() {
+        namespace m = sonora::dsp::master;
+        static constexpr std::array<int, 13> kIds{{m::kMode, m::kAmount, m::kBass, m::kPresence, m::kPreset,
+                                                   m::kNasal, m::kResonance, m::kBeatHighs, m::kEq60,
+                                                   m::kEq250, m::kEq1k, m::kEq4k, m::kEq12k}};
         bool changed = false;
         if (!manual_ && ctx_ && ctx_->getParam) {
-            for (std::size_t i = 0; i < 5; ++i) {
-                const double db = ctx_->param(master_ids::kEq60 + static_cast<std::uint32_t>(i), 0.5) * 16.0 - 8.0;
-                if (std::abs(db - user_[i]) > 0.01) { user_[i] = db; changed = true; }
+            for (int id : kIds) {
+                const auto i = static_cast<std::size_t>(id);
+                const double plain = m::toPlain(id, ctx_->param(static_cast<std::uint32_t>(id), m::defaultNormalized(id)));
+                if (std::abs(plain - plain_[i]) > 1e-4) { plain_[i] = plain; changed = true; }
             }
         }
         if (ctx_ && ctx_->meters) {
@@ -928,17 +1028,13 @@ private:
         const int n = std::max(16, static_cast<int>(pr.getWidth() / 2.0));
         curve_.resize(static_cast<std::size_t>(n));
         autoCurve_.resize(static_cast<std::size_t>(n));
-        std::array<double, 5> total{};
         hasAuto_ = false;
-        for (std::size_t i = 0; i < 5; ++i) {
-            total[i] = user_[i] + auto_[i];
-            hasAuto_ = hasAuto_ || std::abs(auto_[i]) > 0.05;
-        }
+        for (std::size_t i = 0; i < 5; ++i) hasAuto_ = hasAuto_ || std::abs(auto_[i]) > 0.05;
         for (int k = 0; k < n; ++k) {
             const double t = static_cast<double>(k) / (n - 1);
             const double f = kMinF * std::pow(kMaxF / kMinF, t);
             const double x = pr.left + pr.getWidth() * t;
-            curve_[static_cast<std::size_t>(k)] = CPoint(x, yOf(responseDb(total, f, sr_)));
+            curve_[static_cast<std::size_t>(k)] = CPoint(x, yOf(totalAt(f)));
             autoCurve_[static_cast<std::size_t>(k)] = CPoint(x, yOf(responseDb(auto_, f, sr_)));
         }
         invalid();
@@ -946,7 +1042,7 @@ private:
 
     const MasterUiContext* ctx_;
     detail::Fonts fonts_;
-    std::array<double, 5> user_{};
+    std::array<double, sonora::dsp::master::kNumParams> plain_{};
     std::array<double, 5> auto_{};
     double sr_ = 48000.0;
     bool manual_ = false;
@@ -993,13 +1089,17 @@ public:
         CColor dot = theme::muted;
         switch (status) {
             case kAnalysisRunning:
-                std::snprintf(buf, sizeof(buf), "Analysiere Beat + Vocal-Sidechain … %d %%",
+                std::snprintf(buf, sizeof(buf), "Analysiere (8 s) … %d %%",
                               static_cast<int>(std::lround(progress * 100.0)));
                 msg = buf; dot = theme::accent2; break;
             case kAnalysisComplete:
                 msg = "Fertig · RMS Beat " + detail::num(m->beatRmsDb.load(), 1) + " / Vocal "
                     + detail::num(m->vocalRmsDb.load(), 1) + " dBFS · Crest "
                     + detail::num(m->beatCrestDb.load(), 1) + " dB";
+                dot = theme::good; break;
+            case kAnalysisCompleteMixOnly:
+                msg = "Fertig · Mix-Analyse ohne Vocal-Sidechain · RMS " + detail::num(m->beatRmsDb.load(), 1)
+                    + " dBFS · Crest " + detail::num(m->beatCrestDb.load(), 1) + " dB";
                 dot = theme::good; break;
             case kAnalysisNoVocal:
                 msg = "Fertig · kein Vocal erkannt · Beat RMS " + detail::num(m->beatRmsDb.load(), 1)
@@ -1023,7 +1123,8 @@ public:
         const CRect bar(r.left + 10, r.top + 25, r.right - 10, r.top + 28);
         detail::fillRound(c, bar, 1.5, theme::grid);
         const double prog = status == kAnalysisRunning ? progress
-                          : (status == kAnalysisComplete || status == kAnalysisNoVocal) ? 1.0 : 0.0;
+                          : (status == kAnalysisComplete || status == kAnalysisNoVocal
+                             || status == kAnalysisCompleteMixOnly) ? 1.0 : 0.0;
         if (prog > 0.0) {
             CRect pb(bar);
             pb.right = bar.left + bar.getWidth() * std::clamp(prog, 0.0, 1.0);
@@ -1031,22 +1132,23 @@ public:
         }
         // band readout row
         static constexpr std::array<const char*, 5> kNames{{"60 Hz", "250 Hz", "1 kHz", "4 kHz", "12 kHz"}};
-        const bool haveBands = status == kAnalysisComplete || status == kAnalysisNoVocal;
+        const bool mixOnly = status == kAnalysisCompleteMixOnly;
+        const bool haveBands = status == kAnalysisComplete || status == kAnalysisNoVocal || mixOnly;
         const double cw = (r.getWidth() - 20.0) / 5.0;
         for (std::size_t i = 0; i < 5; ++i) {
             const double x = r.left + 10.0 + cw * i;
             const CRect cell(x, r.top + 31, x + cw, r.bottom - 3);
             detail::text(c, kNames[i], CRect(cell.left, cell.top, cell.left + 44, cell.bottom),
                          fonts_.small, theme::muted);
-            std::string b = "B –", v = "V –";
+            std::string b = mixOnly ? "M –" : "B –", v = "V –";
             if (haveBands && m) {
-                b = "B " + detail::num(m->beatBandsDb[i].load(), 0);
-                v = "V " + detail::num(m->vocalBandsDb[i].load(), 0);
+                b = (mixOnly ? "M " : "B ") + detail::num(m->beatBandsDb[i].load(), 0);
+                if (!mixOnly) v = "V " + detail::num(m->vocalBandsDb[i].load(), 0);
             }
             detail::text(c, b.c_str(), CRect(cell.left + 42, cell.top, cell.left + 76, cell.bottom),
                          fonts_.small, theme::text);
             detail::text(c, v.c_str(), CRect(cell.left + 76, cell.top, cell.right, cell.bottom),
-                         fonts_.small, theme::accent2);
+                         fonts_.small, mixOnly ? theme::muted : theme::accent2);
         }
         setDirty(false);
     }
@@ -1842,6 +1944,7 @@ inline VSTGUI::CView* createCommonView(VSTGUI::UTF8StringPtr name, const VSTGUI:
         auto* t = new Toggle(rect, Fonts(d));
         t->setOnColor(readColor(a, d, "sonora-on-color", theme::accent));
         t->setBig(attr(a, "sonora-big") == "true");
+        t->setMomentary(attr(a, "sonora-momentary") == "true");
         return t;
     }
     if (n == "SonoraSegment") {

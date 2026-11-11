@@ -8,8 +8,10 @@
 // editor views through sonora::ui::*UiContext (see sonora_ui.h). Views tolerate a null bridge.
 //
 // Writer side (audio thread, once per process() block):
-//   MasterMeterBridge::publishLevels / publishLoudness / publishDynamics / publishAutoEq /
-//   publishAnalysis* ; ShutterMeterBridge::publish ; DrownerMeterBridge::publish
+//   MasterMeterBridge::publish(engine.meters()) copies a sonora::dsp::master::MasterMeters snapshot
+//   (field-by-field, duck-typed so this header stays engine-free); alternatively the granular
+//   publishLevels / publishLoudness / publishDynamics / publishAutoEq / publishAnalysis* calls.
+//   ShutterMeterBridge::publish ; DrownerMeterBridge::publish
 // Reader side (UI thread): load() the fields, or PeakCell::take() for peak meters (single consumer).
 // UI -> audio requests: MasterMeterBridge::requestLoudnessReset() / consumeLoudnessResetRequest().
 
@@ -41,7 +43,8 @@ struct PeakCell {
     float peek() const noexcept { return value.load(std::memory_order_relaxed); }
 };
 
-// Mirrors the v0.1 AnalysisReadout status enum (same numeric values).
+// Same numeric values as v0.1 AnalysisReadout (0..6) and sonora::dsp::master::AnalysisStatus
+// (static_assert'ed in sonora_ui.h). 7: Master mode without sidechain, mix-only analysis.
 enum AnalysisState : int {
     kAnalysisReady = 0,
     kAnalysisRunning = 1,
@@ -49,7 +52,8 @@ enum AnalysisState : int {
     kAnalysisNoVocal = 3,
     kAnalysisMissingSidechain = 4,
     kAnalysisWrongMode = 5,
-    kAnalysisTooQuiet = 6
+    kAnalysisTooQuiet = 6,
+    kAnalysisCompleteMixOnly = 7
 };
 
 inline float sanitizeMeter(float v, float fallback) noexcept {
@@ -64,6 +68,7 @@ struct MasterMeterBridge {
     std::array<PeakCell, 2> outputPeak{};
     // True-peak maximum (dBTP) held since the last loudness reset.
     std::atomic<float> truePeakMaxDb{kMeterFloorDb};
+    std::atomic<float> outputTruePeakDb{kMeterFloorDb}; // true peak of the last block (dBTP)
 
     // --- loudness (LUFS, BS.1770-4; <= -70 means "no reading yet") ---
     std::atomic<float> momentaryLufs{kMeterFloorDb};
@@ -73,8 +78,11 @@ struct MasterMeterBridge {
     // --- dynamics ---
     std::atomic<float> glueGainReductionDb{0.0f};    // >= 0, amount of reduction
     std::atomic<float> limiterGainReductionDb{0.0f}; // >= 0, amount of reduction
+    std::atomic<float> clipGainReductionDb{0.0f};    // >= 0
     std::atomic<float> clipActivity{0.0f};           // 0..1 (0 = clipper idle)
-    std::atomic<float> correlation{0.0f};            // -1..+1 (0 on silence)
+    std::atomic<float> deEsserGainReductionDb{0.0f}; // >= 0
+    std::atomic<float> duckDb{0.0f};                 // >= 0, sidechain ducking depth
+    std::atomic<float> correlation{1.0f};            // -1..+1
     std::atomic<float> sampleRate{48000.0f};         // for the EQ display (optional)
 
     // --- auto-EQ (dB offsets added by the analysis, per band) ---
@@ -88,6 +96,8 @@ struct MasterMeterBridge {
     std::atomic<double> beatRmsDb{-120.0};
     std::atomic<double> vocalRmsDb{-120.0};
     std::atomic<double> beatCrestDb{0.0};
+    std::atomic<double> autoCompRatio{1.0};
+    std::atomic<int> latencySamples{0};
 
     // --- UI -> audio request ---
     std::atomic<bool> loudnessResetRequest{false};
@@ -103,8 +113,12 @@ struct MasterMeterBridge {
         integratedLufs.store(kMeterFloorDb, std::memory_order_relaxed);
         glueGainReductionDb.store(0.0f, std::memory_order_relaxed);
         limiterGainReductionDb.store(0.0f, std::memory_order_relaxed);
+        outputTruePeakDb.store(kMeterFloorDb, std::memory_order_relaxed);
+        clipGainReductionDb.store(0.0f, std::memory_order_relaxed);
         clipActivity.store(0.0f, std::memory_order_relaxed);
-        correlation.store(0.0f, std::memory_order_relaxed);
+        deEsserGainReductionDb.store(0.0f, std::memory_order_relaxed);
+        duckDb.store(0.0f, std::memory_order_relaxed);
+        correlation.store(1.0f, std::memory_order_relaxed);
         for (auto& g : autoEqDb) g.store(0.0, std::memory_order_relaxed);
         analysisStatus.store(kAnalysisReady, std::memory_order_relaxed);
         analysisProgress.store(0.0, std::memory_order_relaxed);
@@ -113,6 +127,34 @@ struct MasterMeterBridge {
         beatRmsDb.store(-120.0, std::memory_order_relaxed);
         vocalRmsDb.store(-120.0, std::memory_order_relaxed);
         beatCrestDb.store(0.0, std::memory_order_relaxed);
+        autoCompRatio.store(1.0, std::memory_order_relaxed);
+        latencySamples.store(0, std::memory_order_relaxed);
+    }
+
+    // One-call copy of a sonora::dsp::master::MasterMeters snapshot (same field names), e.g.
+    //   bridge.publish(engine.meters()); bridge.publishSampleRate(sampleRate);
+    // Template so this header does not depend on the engine.
+    template <typename Meters>
+    void publish(const Meters& m) noexcept {
+        publishLevels(m.inputPeak[0], m.inputPeak[1], m.outputPeak[0], m.outputPeak[1]);
+        publishLoudness(m.momentaryLufs, m.shortTermLufs, m.integratedLufs, m.truePeakMaxDb);
+        outputTruePeakDb.store(sanitizeMeter(m.outputTruePeakDb, kMeterFloorDb), std::memory_order_relaxed);
+        publishDynamics(m.glueGrDb, m.limiterGrDb, m.clipActivity, m.correlation);
+        clipGainReductionDb.store(std::max(0.0f, sanitizeMeter(m.clipGrDb, 0.0f)), std::memory_order_relaxed);
+        deEsserGainReductionDb.store(std::max(0.0f, sanitizeMeter(m.deEsserGrDb, 0.0f)), std::memory_order_relaxed);
+        duckDb.store(std::max(0.0f, sanitizeMeter(m.duckDb, 0.0f)), std::memory_order_relaxed);
+        publishAutoEq(m.autoEqDb);
+        for (int i = 0; i < kBands; ++i) {
+            const auto idx = static_cast<std::size_t>(i);
+            beatBandsDb[idx].store(m.beatBandsDb[i], std::memory_order_relaxed);
+            vocalBandsDb[idx].store(m.vocalBandsDb[i], std::memory_order_relaxed);
+        }
+        beatRmsDb.store(m.beatRmsDb, std::memory_order_relaxed);
+        vocalRmsDb.store(m.vocalRmsDb, std::memory_order_relaxed);
+        beatCrestDb.store(m.beatCrestDb, std::memory_order_relaxed);
+        autoCompRatio.store(m.autoCompRatio, std::memory_order_relaxed);
+        latencySamples.store(m.latencySamples, std::memory_order_relaxed);
+        publishAnalysisStatus(static_cast<AnalysisState>(m.analysisStatus), m.analysisProgress);
     }
 
     // Block peaks, linear |x| maxima (pass 0 for a missing channel; mono: pass L twice).

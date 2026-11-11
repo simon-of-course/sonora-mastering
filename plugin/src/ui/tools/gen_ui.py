@@ -17,6 +17,7 @@ import cmath
 import html
 import math
 import os
+import re
 from dataclasses import dataclass, field
 from xml.sax.saxutils import quoteattr
 
@@ -127,8 +128,8 @@ def knob_row(name, tag, x, y, w, text, d=52, bipolar=False, accent="accent", rul
     ])
 
 
-def toggle(tag, x, y, w, h, title, big=False, on="accent"):
-    return V("toggle", x, y, w, h, dict(tag=tag, title=title, big=big, on=on))
+def toggle(tag, x, y, w, h, title, big=False, on="accent", momentary=False):
+    return V("toggle", x, y, w, h, dict(tag=tag, title=title, big=big, on=on, momentary=momentary))
 
 
 def segment(tag, x, y, w, h, names, accent="accent"):
@@ -258,7 +259,7 @@ def master_layout():
     ])
     eq_kids = [
         card("grp-analyze", 478, 7, 110, 24, style="none", rule=BEAT_ONLY, kids=[
-            toggle(17, 0, 0, 110, 24, "Analysieren", on="accent2")]),
+            toggle(17, 0, 0, 110, 24, "Analysieren", on="accent2", momentary=True)]),
         custom("SonoraEqGraph", 12, 36, 354, 200),
     ]
     for i, (lab, tag) in enumerate(zip(["60", "250", "1k", "4k", "12k"], range(11, 16))):
@@ -450,9 +451,10 @@ class UidescWriter:
         elif v.kind == "toggle":
             self.lines.append(f'{ind}<view class="CTextButton" custom-view-name="SonoraToggle" ' + self.a(
                 control_tag=self.tagname(p["tag"]), **g, title=p["title"],
-                font="sonora.value" if p["big"] else "sonora.small.bold", kick_style=False,
+                font="sonora.value" if p["big"] else "sonora.small.bold", kick_style=p["momentary"],
                 min_value=0.0, max_value=1.0, default_value=float(self.params[p["tag"]][3]),
                 sonora_on_color=color_ref(p["on"]), sonora_big=p["big"] or None,
+                sonora_momentary=p["momentary"] or None,
                 text_color="sonora.text", text_color_highlighted="sonora.text", frame_color="sonora.stroke",
                 frame_color_highlighted="sonora.accent", frame_width=1.0, round_radius=9.0) + "/>")
         elif v.kind == "segment":
@@ -612,6 +614,56 @@ def eq_response(g, f, sr=48000.0):
     return db + bq_db(bq_shelf(sr, EQ_F[4], g[4], True), f, sr)
 
 
+def bq_highpass(sr, f, q=0.7071):
+    w = 2 * math.pi * f / sr
+    c, a = math.cos(w), math.sin(w) / (2 * q)
+    return norm_bq((1 + c) / 2, -(1 + c), (1 + c) / 2, 1 + a, -2 * c, 1 - a)
+
+
+def _engine_tables():
+    """Parameter ranges and preset EQ data parsed from the master engine (single source of truth)."""
+    src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "dsp", "master_engine.h"),
+               encoding="utf-8").read()
+    num = r"(-?[\d.]+)"
+    params = [tuple(float(x) for x in m) for m in re.findall(
+        r'\{"[^"]*",\s*"[^"]*",\s*' + num + r",\s*" + num + r",\s*" + num + r",\s*(\d+)\}", src)]
+    presets = []
+    for m in re.finditer(r'\{"[^"]+",\s*\{\{([^}]*)\}\},\s*([^}]*)\}', src):
+        eq = [float(x) for x in m.group(1).split(",")]
+        rest = [float(x) for x in m.group(2).split(",")]
+        presets.append(dict(eq=eq, presence=rest[0], nasal=rest[1], resonance=rest[2]))
+    assert len(params) == 27 and len(presets) == 12, (len(params), len(presets))
+    return params, presets
+
+
+ENGINE_PARAMS, ENGINE_PRESETS = _engine_tables()
+
+
+def to_plain(pid, norm):
+    lo, hi, _, steps = ENGINE_PARAMS[pid]
+    if steps > 0:
+        norm = round(norm * steps) / steps
+    return lo + norm * (hi - lo)
+
+
+def engine_eq_response(plain, auto, f, sr=48000.0):
+    """Port of MasterEngine::eqResponseDb (computeEqTargets + makeEqFilter + high-pass)."""
+    mode = min(2, max(0, round(plain[0])))
+    a = plain[1] / 100
+    pr = ENGINE_PRESETS[min(11, max(0, round(plain[6])))]
+    db = [plain[11 + b] + pr["eq"][b] * a + auto[b] for b in range(5)]
+    db[0] += plain[2]
+    db[4] += plain[9]
+    nasal = -4.0 * min(1, max(0, plain[7] / 100 + pr["nasal"] * a))
+    res = -4.5 * min(1, max(0, plain[8] / 100 + pr["resonance"] * a))
+    pres = plain[3] + pr["presence"] * a
+    out = bq_db(bq_shelf(sr, 60, db[0], False), f, sr) + bq_db(bq_shelf(sr, 12000, db[4], True), f, sr)
+    for fc, q, g in ((250, .65, db[1]), (1000, .65, db[2]), (4000, .65, db[3]), (900, 1.0, nasal),
+                     (3400, 3.2, res), (3500, 0.9, pres)):
+        out += bq_db(bq_peak(sr, fc, q, g), f, sr)
+    return out + bq_db(bq_highpass(sr, 80.0 if mode == 0 else 20.0), f, sr)
+
+
 def iec(db):
     if db < -70: p = 0.0
     elif db < -60: p = (db + 70) * 0.25
@@ -767,7 +819,8 @@ class Html:
         w, h = v.w, v.h
         user = [self.norm(t) * 16 - 8 for t in range(11, 16)]
         auto = self.demo.get("autoEq", [0] * 5)
-        total = [u + a for u, a in zip(user, auto)]
+        plain = [to_plain(i, self.norm(i)) for i in range(27)]
+        total_at = lambda f: engine_eq_response(plain, auto, f)
         pl, pt, pr_, pb = 30.0, 10.0, w - 12.0, h - 20.0
         pw, ph = pr_ - pl, pb - pt
         xo = lambda f: pl + pw * math.log(f / 20) / math.log(1000)
@@ -794,7 +847,7 @@ class Html:
             t = k / (n - 1)
             f = 20 * 1000 ** t
             x = pl + pw * t
-            pts.append((x, yo(eq_response(total, f))))
+            pts.append((x, yo(total_at(f))))
             apts.append((x, yo(eq_response(auto, f))))
         zero = yo(0)
         line = " ".join(f"{x:.1f},{y:.1f}" for x, y in pts)
@@ -813,7 +866,7 @@ class Html:
         s.append(f'<polyline points="{line}" fill="none" stroke="#b08fff" stroke-width="2" stroke-linejoin="round" '
                  f'stroke-linecap="round"/>')
         for i in range(5):
-            hx, hy = xo(EQ_F[i]), yo(eq_response(total, EQ_F[i]))
+            hx, hy = xo(EQ_F[i]), yo(total_at(EQ_F[i]))
             ring = C["accent2"] if abs(user[i]) > 0.05 else C["accent"]
             s.append(f'<circle cx="{hx:.1f}" cy="{hy:.1f}" r="9" fill="{rgba(C["accent"], 50)}"/>')
             s.append(f'<circle cx="{hx:.1f}" cy="{hy:.1f}" r="6.5" fill="{C["inset"]}" stroke="{ring}" stroke-width="2"/>')
@@ -1226,6 +1279,9 @@ MASTER_COMMENT = """  SONORA Master v0.2 editor (960 x 640). GENERATED by plugin
                          grp-analyze
     Master-only "0=2"  : grp-loudness, grp-ceiling, grp-clipper (limiter/clipper meters dim too)
     always             : Stärke, grp-input, grp-output, grp-glue, grp-saturation, EQ faders
+  "Analysieren" (tag 17) is momentary: SonoraToggle with sonora-momentary sends 1, then 0 about
+  250 ms later in a separate edit gesture (plain-VSTGUI fallback: kick-style). The processor
+  starts the analysis on the rising edge 0 -> 1.
 """
 SHUTTER_COMMENT = """  SONORA Shutter v0.2 editor (640 x 420). GENERATED by plugin/src/ui/tools/gen_ui.py - edit there.
   Custom views come from sonora::ui::createShutterView (plugin/src/ui/sonora_ui.h).
@@ -1242,7 +1298,7 @@ def main():
     jobs = [
         ("sonora.uidesc", "ui-preview.html", "SONORA Master – Vorschau", master_layout(), MASTER_PARAMS,
          MASTER_COMMENT, dict(
-             autoEq=[1.2, -0.8, -1.5, 0.6, 1.0],
+             autoEq=[0.0, -0.4, -0.9, -0.6, 0.0],
              analysis=dict(beatRms=-14.2, vocalRms=-17.8, crest=11.6, beat=[-18, -21, -24, -27, -33],
                            vocal=[-35, -24, -20, -22, -30]),
              levels=dict(level=[-7.5, -8.2, -2.4, -2.9], hold=[-4.1, -4.6, -1.0, -1.1]),

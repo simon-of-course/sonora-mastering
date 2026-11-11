@@ -802,6 +802,15 @@ static void printPresetTable(const RapMix& mix) {
         CHECK(m.tp <= -0.9, "%s TP %.2f", M::kPresets[static_cast<std::size_t>(p)].name, m.tp);
         if (p >= 6) CHECK(m.lufs > in.lufs + 3.0, "rap preset %s clearly louder (%.2f)", M::kPresets[static_cast<std::size_t>(p)].name, m.lufs);
         if (p >= 6) CHECK(m.plr > 6.0, "rap preset %s PLR %.2f not crushed", M::kPresets[static_cast<std::size_t>(p)].name, m.plr);
+        // Rap lives from the vocal: the 1-4 kHz band (relative to integrated loudness) must not
+        // drop against the input mix; Vocal Upfront lifts it by 1-2 dB.
+        const double vocalDelta = (m.mid - m.lufs) - (in.mid - in.lufs);
+        const std::string name = M::kPresets[static_cast<std::size_t>(p)].name;
+        if (name == "Vocal Upfront") {
+            CHECK(vocalDelta >= 1.0 && vocalDelta <= 2.0, "Vocal Upfront vocal band %+.2f dB (want +1..+2)", vocalDelta);
+        } else if (p >= 6) {
+            CHECK(vocalDelta >= 0.0, "%s vocal band %+.2f dB (must not drop)", name.c_str(), vocalDelta);
+        }
     }
 }
 
